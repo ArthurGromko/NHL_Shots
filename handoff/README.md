@@ -57,7 +57,9 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
     "Points d'attention" ci-dessous — remplacé par des termes d'interaction
     dans le modèle poolé).
 15. **calibration_check.py** — vérifie la calibration des probabilités
-    Over/Under et calcule le Brier score.
+    Over/Under et calcule le Brier score (ligne 2,5 tirs).
+16. **calibration_multi_line.py** — même vérification sur plusieurs lignes
+    (0,5 / 1,5 / 2,5 / 3,5 / 4,5 tirs).
 
 ## Résultats actuels (v2 — post correction colinéarité PP + interactions)
 
@@ -121,8 +123,15 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
    mais petit, ou une mesure trop bruitée (à tester : écart à la moyenne de
    ligue plutôt que valeur brute).
 
-5. **Pas encore testé** : calibration sur d'autres lignes (1,5 / 3,5 / 4,5
-   tirs).
+5. **[RÉSOLU] Calibration testée sur d'autres lignes** (0,5 / 1,5 / 2,5 / 3,5 /
+   4,5 tirs, `scripts/calibration_multi_line.py`). Le modèle reste calibré
+   partout, mais avec un biais conservateur constant dans le décile de
+   probabilité prédite le plus élevé (le modèle sous-estime légèrement les
+   cas à forte probabilité, sur toutes les lignes). L'edge vs baseline naïve
+   (Brier) est le plus fort au milieu de la distribution (~14% sur 1,5 et
+   2,5 tirs) et plus faible aux extrêmes (~9% sur 0,5 et 4,5 tirs). NB bat
+   systématiquement Poisson en calibration (pas en Brier) sur toutes les
+   lignes, cohérent avec la surdispersion confirmée en début de projet.
 
 6. **Pas de comparaison au marché** : le modèle donne une probabilité, mais
    il n'y a pour l'instant aucune cote réelle à comparer pour calculer un
@@ -144,30 +153,38 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
 ## Cotes de marché (en cours)
 
 Objectif : calculer un edge réel en comparant les probabilités du modèle à
-des cotes de marché historiques, via [The Odds API](https://the-odds-api.com).
+des cotes de marché, via [The Odds API](https://the-odds-api.com).
 
 - Le marché `player_shots_on_goal` (NHL, bookmakers US) existe bien sur
-  cette API.
-- L'historique des player props n'est disponible qu'à partir du
-  **2023-05-03** — ce qui coïncide bien avec notre période de test
-  (saisons 2023-2024).
-- Le tier gratuit donne 500 crédits/mois ; le coût exact en crédits d'une
-  requête historique sur des player props n'est pas documenté publiquement
-  et reste à vérifier empiriquement (probablement insuffisant pour couvrir
-  une saison complète avec le tier gratuit).
-- **Bloqué en attente d'une clé API** : la création de compte doit être
-  faite par l'utilisateur (the-odds-api.com), le scraper n'est pas encore
-  écrit.
+  cette API, avec un sport key `icehockey_nhl`.
+- **L'endpoint historique nécessite un plan payant** (confirmé
+  empiriquement : `HISTORICAL_UNAVAILABLE_ON_FREE_USAGE_PLAN` sur le tier
+  gratuit, malgré une doc publique qui suggérait le contraire). Le tier
+  payant le moins cher est 30$/mois (20K crédits) — pas retenu pour
+  l'instant, décision de l'utilisateur de ne pas payer.
+- **Pas d'alternative gratuite trouvée** : recherche faite sur Kaggle,
+  BigDataBall, Princeton DSS, MoneyPuck, PropCruncher, Shot Propz, Odds
+  Shark — soit ce sont des données de résultats réels (shots on goal en
+  tant que stat de jeu, qu'on a déjà via MoneyPuck), soit des cotes de
+  match (moneyline/total, pas de player props), soit des outils d'affichage
+  live sans export ni archive. Les cotes historiques de player props ne
+  semblent archivées nulle part gratuitement (marché encore récent, ~2021+).
+- **Décision** : reporté au début de la saison 2026-2027 (octobre). Le tier
+  gratuit de The Odds API donne accès aux cotes **live** (pas historiques),
+  donc le plan est de scraper `player_shots_on_goal` au jour le jour dès le
+  début de saison pour construire notre propre historique, gratuitement,
+  et comparer aux prédictions du modèle au fil de l'eau. Scraper encore à
+  écrire le moment venu (clé API déjà obtenue et testée, stockée hors dépôt
+  git dans `pipeline_run/.env`, sport key et market key confirmés).
 
 ## Prochaines étapes suggérées
 
-1. Obtenir une clé The Odds API et écrire le scraper de cotes historiques
-   `player_shots_on_goal` sur l'échantillon 2023-2024 couvert par l'API.
-2. Une fois les cotes obtenues, calculer l'edge (probabilité modèle vs
-   probabilité implicite du marché) et backtester une stratégie simple.
-3. Tester la calibration sur d'autres lignes (1,5 / 3,5 / 4,5 tirs).
-4. Modèle séparé pour le cold start des recrues (priors repêchage/junior).
-5. Réfléchir à l'architecture du site web (stack, hosting, comment publier
+1. **Octobre 2026 (début de saison)** : écrire le scraper live
+   `player_shots_on_goal` (The Odds API, tier gratuit) et commencer à
+   construire un historique de cotes réelles pour comparer aux
+   prédictions du modèle et calculer un edge au fil de la saison.
+2. Modèle séparé pour le cold start des recrues (priors repêchage/junior).
+3. Réfléchir à l'architecture du site web (stack, hosting, comment publier
    les prédictions quotidiennes, stratégie de contenu/SEO pour le trafic).
 
 ## Fichiers inclus dans ce transfert
