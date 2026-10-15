@@ -65,6 +65,11 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
     Over/Under et calcule le Brier score (ligne 2,5 tirs).
 16. **calibration_multi_line.py** — même vérification sur plusieurs lignes
     (0,5 / 1,5 / 2,5 / 3,5 / 4,5 tirs).
+17. **fit_recalibration.py** — recalibration de mu (sortie NB) : ré-entraîne
+    la NB sur 2008-2022, prédit 2023-24 (saison de validation), apprend une
+    correction mu → mu' (log-linéaire et isotonique) sur cette saison, puis
+    l'évalue sur le test avec les prédictions du modèle principal.
+    → `recalibration.pkl` (correction retenue : isotonique)
 
 ## Résultats actuels (v3 — ajout de la saison 2025-26, split décalé d'une saison)
 
@@ -102,14 +107,33 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
   surtout de l'hétérogénéité entre joueurs, pas de bruit résiduel une fois les
   features connues.
 
-- **Calibration** : bonne en moyenne (sous-estimation globale d'environ 1%
-  des tirs : 1,554 prédit vs 1,572 réel en 2024-25, 1,531 vs 1,548 en
-  2025-26), mais les prédictions sont **un peu trop resserrées** autour de la
-  moyenne : surestimation dans les déciles bas, sous-estimation de 2 à 3
-  points de probabilité dans les déciles hauts (ex. Over 2,5, décile 9 :
-  37,2% prédit vs 40,4% réel). C'est le "biais conservateur" déjà vu en v2,
-  plus visible sur ce test. À corriger avant de comparer aux cotes (piste :
-  recalibration isotonique/Platt sur une saison de validation).
+- **Calibration (brute)** : bonne en moyenne (sous-estimation globale
+  d'environ 1% des tirs), mais mu est **trop resserré** autour de la moyenne :
+  par décile de mu, réel/prédit va de 0,92 (décile bas) à 1,06 (décile 9).
+  La variance autour de mu, elle, colle bien à la NB (alpha=0,067) — c'est
+  donc mu qu'il faut corriger, pas la loi.
+
+- **Recalibration isotonique de mu** (`fit_recalibration.py`, apprise sur
+  2023-24, évaluée sur le test 2024-26) — **retenue** :
+
+  | Ligne | Erreur moy. par décile, brut | log-linéaire | isotonique |
+  |---|---|---|---|
+  | 0,5 | 1,55 pt | 1,01 pt | **0,45 pt** |
+  | 1,5 | 1,60 pt | 0,90 pt | **0,67 pt** |
+  | 2,5 | 1,13 pt | 0,86 pt | **0,59 pt** |
+  | 3,5 | 0,68 pt | 0,72 pt | **0,57 pt** |
+  | 4,5 | 0,36 pt | 0,47 pt | **0,31 pt** |
+
+  L'erreur de calibration est environ divisée par 2-3 sur les lignes
+  0,5-2,5 ; Brier et MAE quasiment inchangés (attendu : la recalibration
+  corrige le niveau des probabilités, pas la capacité à classer les joueurs).
+  Ex. Over 2,5, décile 9 : 37,2% prédit vs 40,4% réel en brut → 39,9% vs
+  40,7% après correction. La version log-linéaire (b=1,06) corrige le milieu
+  mais surcorrige le haut de la distribution.
+
+  **Pour la mise en production** : quand le modèle sera ré-entraîné sur
+  toutes les saisons, la correction devra être ré-apprise sur la dernière
+  saison disponible (même procédure, saison de validation décalée).
 
 ## Points d'attention identifiés
 
@@ -152,7 +176,15 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
    systématiquement Poisson en calibration (pas en Brier) sur toutes les
    lignes, cohérent avec la surdispersion confirmée en début de projet.
 
-6. **Pas de comparaison au marché** : le modèle donne une probabilité, mais
+6. **Gros tireurs surestimés** : sur le 1% des prédictions les plus hautes
+   (mu ≈ 4), le modèle prédit 4,03 tirs pour 3,64 réels (~+10%) ; sur le
+   0,1% le plus haut, 5,01 pour 3,88. La recalibration isotonique ne corrige
+   pas ce cas (trop peu de points à ce niveau dans la saison de validation).
+   À traiter avant de parier sur les lignes 3,5/4,5 des stars : piste =
+   shrinkage plus fort de `shots_avg_last5` vers la moyenne de carrière, ou
+   plafonnement appris sur plusieurs saisons.
+
+7. **Pas de comparaison au marché** : le modèle donne une probabilité, mais
    il n'y a pour l'instant aucune cote réelle à comparer pour calculer un
    edge. Voir "Cotes de marché" ci-dessous.
 
@@ -209,7 +241,8 @@ des cotes de marché, via [The Odds API](https://the-odds-api.com).
 ## Fichiers inclus dans ce transfert
 - `scripts/` — tous les scripts Python du pipeline, dans l'ordre d'exécution
   (voir section Pipeline ci-dessus).
-- `model_artifacts/` — `final_features.json` (15 features finales), et les
+- `model_artifacts/` — `final_features.json` (15 features finales),
+  `recalibration.pkl` (correction isotonique de mu), et les
   modèles déjà entraînés sur ce feature set : `poisson_model.pkl`,
   `nb_params.pkl` (scipy), `nb_params_sm.pkl` (statsmodels), `scaler.pkl`,
   `xgb_model.pkl`, `lgb_model.pkl`.
