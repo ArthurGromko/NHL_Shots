@@ -11,7 +11,12 @@ import pandas as pd
 
 API = "https://api.the-odds-api.com/v4/sports/icehockey_nhl"
 MARKET = "player_shots_on_goal"
-REGION = "us"
+# Bookmakers nommés plutôt qu'une région: jusqu'à 10 coûtent comme 1 région (1 crédit/match).
+# Pinnacle (région eu) sert de référence "sharp" pour noter le modèle. bet365 n'est pas couvert
+# par The Odds API (seulement bet365_au, payant, AFL/NRL).
+BOOKMAKERS = ["pinnacle", "fanduel", "draftkings", "betmgm", "espnbet",
+              "betrivers", "bovada", "betonlineag", "lowvig", "hardrockbet"]
+assert len(BOOKMAKERS) <= 10, "au-delà de 10 bookmakers, chaque match coûte 2 crédits"
 MIN_CREDITS_LEFT = 20  # marge de sécurité
 SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
@@ -77,7 +82,7 @@ def main():
     os.makedirs(raw_dir, exist_ok=True)
     rows = []
     for e, g in todo:
-        data, headers = get(f"/events/{e['id']}/odds", apiKey=key, regions=REGION, markets=MARKET, oddsFormat="decimal")
+        data, headers = get(f"/events/{e['id']}/odds", apiKey=key, bookmakers=",".join(BOOKMAKERS), markets=MARKET, oddsFormat="decimal")
         with open(f"{raw_dir}/{g['gameId']}_{fetched_at.replace(':', '')}.json", "w") as f:
             json.dump(data, f)
         n = 0

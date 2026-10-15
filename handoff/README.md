@@ -238,8 +238,8 @@ NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
 3. **predict_today.py** — applique `make_model_frame()` et le modèle de
    production ; → `predictions/predictions_<date>.csv` (mu et P(Over) pour
    0,5 à 4,5 tirs).
-4. **fetch_odds.py** — cotes `player_shots_on_goal` (The Odds API, région us,
-   1 crédit par match, matchs pas encore commencés seulement ; `--dry-run`
+4. **fetch_odds.py** — cotes `player_shots_on_goal` (The Odds API, liste de
+   10 bookmakers nommés dont Pinnacle — même coût qu'une région, 1 crédit par match, matchs pas encore commencés seulement ; `--dry-run`
    pour ne rien dépenser). Brut → `odds/raw/<date>/`, à plat →
    `odds/odds_<date>.csv`. S'arrête s'il reste moins de 20 crédits.
 5. **compare_odds.py** — associe les noms (normalisés, homonymes résolus par
@@ -270,6 +270,12 @@ Notes :
 - Crédits : ~1 312 matchs/saison ≈ 220 crédits/mois pour une capture par
   match, sous les 500 du tier gratuit. Première capture : 11 crédits
   (489 restants au 15 oct. 2026).
+- Bookmakers : l'utilisateur parie sur **bet365 et Pinnacle**. bet365 n'est
+  pas couvert par The Odds API (seulement `bet365_au`, payant, AFL/NRL).
+  Pinnacle (région `eu`) est demandé à chaque capture, mais n'avait aucune
+  prop de tirs NHL lors du test du 15 oct. à ~1 h (FanDuel, BetOnline et
+  theScore Bet oui) — à confirmer sur les captures de 13 h. La doc indique
+  que les props sont "mainly limited to US sports and US bookmakers".
 - `certifi` ajouté au venv (le Python de python.org sur macOS n'a pas de
   certificats SSL par défaut).
 
