@@ -1,3 +1,4 @@
+import glob
 import pandas as pd
 
 cols_needed = [
@@ -10,14 +11,17 @@ cols_needed = [
 ]
 
 chunksize = 200_000
-reader = pd.read_csv(
-    "extracted/2008_to_2024.csv",
-    usecols=cols_needed,
-    chunksize=chunksize,
-    low_memory=False
-)
+# tous les CSV MoneyPuck de extracted/ (2008_to_2024.csv + une saison par fichier ensuite)
+input_files = sorted(glob.glob("extracted/*.csv"))
+print("Fichiers source:", input_files)
 
-out_path = "reduced_shots_2008_2024.csv"
+def read_chunks():
+    for path in input_files:
+        yield from pd.read_csv(path, usecols=cols_needed, chunksize=chunksize, low_memory=False)
+
+reader = read_chunks()
+
+out_path = "reduced_shots.csv"
 first = True
 total_rows = 0
 bad_rows = 0

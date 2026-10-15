@@ -1,6 +1,6 @@
 import pandas as pd
 
-df = pd.read_csv("reduced_shots_2008_2024.csv", low_memory=False)
+df = pd.read_csv("reduced_shots.csv", low_memory=False)
 df_all = df[df["situation"] == "all"].copy()
 df_all = df_all[df_all["icetime"] > 0]  # exclure les joueurs qui n'ont pas joué
 

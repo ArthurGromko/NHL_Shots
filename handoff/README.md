@@ -6,19 +6,24 @@ par joueur (shots on goal props), identifier des value bets potentiels, et
 éventuellement monétiser via un site web (trafic, affiliation, contenu).
 
 ## Données sources
-- Fichier brut : `2008_to_2024.zip` (fourni par l'utilisateur), format MoneyPuck
-  "skaters" — une ligne = un joueur, un match, une situation de jeu.
+- Fichiers bruts : `2008_to_2024.zip` (fourni par l'utilisateur) + `2025.zip`
+  (saison 2025-2026, téléchargée depuis https://moneypuck.com/data.htm —
+  `https://peter-tanner.com/moneypuck/downloads/seasonPlayersSummary/skaters/<année>.zip`),
+  format MoneyPuck "skaters" — une ligne = un joueur, un match, une situation
+  de jeu. Les saisons sont nommées par leur année de début (`2025` = 2025-2026).
+  Saison régulière seulement (pas de séries).
 - Colonnes clés : `playerId`, `gameId`, `season`, `situation` (5on5/5on4/4on5/all/other),
   `icetime`, `I_F_shotsOnGoal`, `I_F_shotAttempts`, etc.
-- 17 saisons (2008-2024), ~2 945 joueurs uniques, ~20 288 matchs.
+- 18 saisons (2008-09 à 2025-26), 3 059 joueurs uniques, 21 600 matchs.
 
 ## Pipeline — ordre d'exécution des scripts
 
 Tous les scripts sont dans `scripts/`. Reproduire dans cet ordre depuis un
-dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
+dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
+`2025.csv`, ... — `clean_reduce.py` lit tous les `extracted/*.csv`) :
 
 1. **clean_reduce.py** — nettoie le CSV brut (2,5 Go), garde seulement les
-   colonnes utiles, écrit `reduced_shots_2008_2024.csv` (~440 Mo).
+   colonnes utiles, écrit `reduced_shots.csv` (~460 Mo).
 2. **explore.py** — exploration de base, validation de la structure.
 3. **overdispersion.py** — teste Poisson vs binomiale négative (ratio
    variance/moyenne = 1,41 → surdispersion confirmée → NB préférable).
@@ -34,14 +39,14 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
 7. **build_pp_features.py** — feature d'unité spéciale : usage en avantage
    numérique (5on4), classement relatif du joueur dans son équipe
    (`pp_usage_rank_team`), flags `is_pp1_likely`/`is_top5_pp_usage`.
-   → `features_full_v2.csv` (dataset final, 730 155 lignes × 44 colonnes)
+   → `features_full_v2.csv` (dataset final, 777 367 lignes × 44 colonnes)
 8. **correlation_analysis.py** — analyse de colinéarité, élagage des features
    redondantes (ex: toutes les fenêtres TOI étaient corrélées >0,92 entre elles ;
    `pp_toi_avg_last10` et `pp_usage_rank_team` corrélées à -0,91).
-9. **prepare_model_data.py** — split temporel train (2008-2022) / test
-   (2023-2024), imputation des NaN de contexte d'équipe (débuts de franchise),
+9. **prepare_model_data.py** — split temporel train (2008-09 à 2023-24) / test
+   (2024-25 et 2025-26), imputation des NaN de contexte d'équipe (débuts de franchise),
    filtre des matchs "zéro" (premier match de carrière, pas d'historique
-   disponible — 2 945 lignes, flag `games_played_before==0`), encodage
+   disponible — 3 059 lignes, flag `games_played_before==0`), encodage
    catégoriel, et construction des termes d'interaction position×feature.
    → `model_train_clean.csv` / `model_test_clean.csv` (15 features finales)
 10. **fit_poisson.py** — modèle Poisson baseline (scikit-learn PoissonRegressor).
@@ -61,7 +66,7 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
 16. **calibration_multi_line.py** — même vérification sur plusieurs lignes
     (0,5 / 1,5 / 2,5 / 3,5 / 4,5 tirs).
 
-## Résultats actuels (v2 — post correction colinéarité PP + interactions)
+## Résultats actuels (v3 — ajout de la saison 2025-26, split décalé d'une saison)
 
 - **Features finales retenues** (15 features, voir `model_artifacts/final_features.json`) :
   `shots_avg_last5`, `shots_career_avg`, `toi_avg_last10`, `pp_usage_rank_team`,
@@ -70,28 +75,41 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
   `position_D`, `position_L`, `position_R`, `home_or_away_HOME`,
   `toi_avg_last10_x_D`, `pp_usage_rank_team_x_D`.
 
-- **Comparaison des modèles (test 2023-2024, n=94 227)** :
+- **Comparaison des modèles (test 2024-25 + 2025-26, n=94 215 ; train 2008-09 à 2023-24, n=680 093)** :
 
   | Modèle | MAE test | Brier score (Over 2,5) |
   |---|---|---|
-  | Baseline (moyenne de ligue) | 1,2123 | 0,1803 |
-  | Poisson (sklearn) | 1,0405 | 0,1545 |
-  | NB (scipy maison / statsmodels) | 1,0400 | 0,1545 |
-  | XGBoost (objectif Poisson) | 1,0402 | 0,1540 |
-  | LightGBM (objectif Poisson) | 1,0405 | 0,1540 |
+  | Baseline (moyenne de ligue) | 1,1948 | 0,1715 |
+  | Poisson (sklearn) | 1,0198 | 0,1484 |
+  | NB (scipy maison / statsmodels) | 1,0193 | 0,1484 |
+  | XGBoost (objectif Poisson) | 1,0200 | 0,1480 |
+  | LightGBM (objectif Poisson) | 1,0205 | 0,1480 |
 
-  Amélioration relative ~14,2% vs baseline naïve. Les GBM font légèrement
-  mieux sur le Brier score, mais l'écart avec les modèles paramétriques reste
-  faible — le signal est déjà bien capturé linéairement une fois les bonnes
-  features (et interactions) en place.
+  Amélioration relative ~14,7% (MAE) / ~13,5% (Brier) vs baseline naïve.
+  MAE par saison de test (NB) : 1,0229 en 2024-25, 1,0157 en 2025-26 — pas de
+  dégradation sur la saison la plus récente. Les GBM font toujours très
+  légèrement mieux sur le Brier score, avec un écart faible : le signal est
+  déjà bien capturé linéairement.
+  *(v2, split précédent train 2008-2022 / test 2023-2024 : MAE NB 1,0400,
+  Brier 0,1545 vs baseline 1,2123 / 0,1803 — les chiffres absolus ne sont pas
+  directement comparables car l'ensemble de test a changé.)*
+
+- **Coefficients stables** par rapport à v2 : mêmes signes et ordres de
+  grandeur pour toutes les features, interactions toujours très significatives
+  (statsmodels : z=-15,4 et z=-20,1).
 
 - **Alpha (dispersion NB) estimé** : 0,067 — la surdispersion "brute" venait
   surtout de l'hétérogénéité entre joueurs, pas de bruit résiduel une fois les
   features connues.
 
-- **Calibration** : bonne à travers les déciles, léger biais conservateur dans
-  le décile de probabilité le plus élevé (le modèle sous-estime un peu les cas
-  à forte probabilité).
+- **Calibration** : bonne en moyenne (sous-estimation globale d'environ 1%
+  des tirs : 1,554 prédit vs 1,572 réel en 2024-25, 1,531 vs 1,548 en
+  2025-26), mais les prédictions sont **un peu trop resserrées** autour de la
+  moyenne : surestimation dans les déciles bas, sous-estimation de 2 à 3
+  points de probabilité dans les déciles hauts (ex. Over 2,5, décile 9 :
+  37,2% prédit vs 40,4% réel). C'est le "biais conservateur" déjà vu en v2,
+  plus visible sur ce test. À corriger avant de comparer aux cotes (piste :
+  recalibration isotonique/Platt sur une saison de validation).
 
 ## Points d'attention identifiés
 
@@ -114,7 +132,7 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
    MAE des modèles Poisson/NB (1,0407→1,0405 et 1,0402→1,0400).
 
 3. **Cold start des recrues** : les matchs de premier match en carrière
-   (2 945 lignes) n'ont aucune feature historique — actuellement exclus du
+   (3 059 lignes) n'ont aucune feature historique — actuellement exclus du
    modèle. Pourrait nécessiter un modèle séparé basé sur des priors
    (repêchage, ligue junior, etc.) si on veut couvrir ce cas.
 
@@ -125,11 +143,12 @@ dossier contenant `extracted/2008_to_2024.csv` (dézippé du fichier original) :
 
 5. **[RÉSOLU] Calibration testée sur d'autres lignes** (0,5 / 1,5 / 2,5 / 3,5 /
    4,5 tirs, `scripts/calibration_multi_line.py`). Le modèle reste calibré
-   partout, mais avec un biais conservateur constant dans le décile de
-   probabilité prédite le plus élevé (le modèle sous-estime légèrement les
-   cas à forte probabilité, sur toutes les lignes). L'edge vs baseline naïve
-   (Brier) est le plus fort au milieu de la distribution (~14% sur 1,5 et
-   2,5 tirs) et plus faible aux extrêmes (~9% sur 0,5 et 4,5 tirs). NB bat
+   en moyenne sur toutes les lignes, mais avec des prédictions trop
+   resserrées (cas à forte probabilité sous-estimés, cas à faible
+   probabilité surestimés — voir "Calibration" ci-dessus). L'edge vs
+   baseline naïve (Brier, v3) est le plus fort au milieu de la distribution
+   (~13,5% sur 1,5 et 2,5 tirs) et plus faible aux extrêmes (~9% sur 0,5,
+   ~10% sur 3,5, ~7% sur 4,5 tirs). NB bat
    systématiquement Poisson en calibration (pas en Brier) sur toutes les
    lignes, cohérent avec la surdispersion confirmée en début de projet.
 

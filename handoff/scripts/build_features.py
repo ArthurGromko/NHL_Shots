@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-df = pd.read_csv("reduced_shots_2008_2024.csv", low_memory=False)
+df = pd.read_csv("reduced_shots.csv", low_memory=False)
 
 # On travaille sur la situation "all" = agrégat complet du match par joueur
 df = df[df["situation"] == "all"].copy()

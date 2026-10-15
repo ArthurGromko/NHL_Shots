@@ -51,9 +51,9 @@ interaction_cols = ["toi_avg_last10_x_D", "pp_usage_rank_team_x_D"]
 
 final_features = numeric_features + dummy_cols + interaction_cols
 
-# --- Split temporel: 2008-2022 = train, 2023-2024 = test ---
-train = df_model[df_model["season"] <= 2022].copy()
-test = df_model[df_model["season"] >= 2023].copy()
+# --- Split temporel: 2008-2023 = train, 2024-2025 = test ---
+train = df_model[df_model["season"] <= 2023].copy()
+test = df_model[df_model["season"] >= 2024].copy()
 
 print(f"\nTrain: {len(train)} lignes ({train['season'].min()}-{train['season'].max()})")
 print(f"Test:  {len(test)} lignes ({test['season'].min()}-{test['season'].max()})")
