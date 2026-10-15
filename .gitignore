@@ -3,3 +3,5 @@
 pipeline_run/
 2008_to_2024.zip
 .env
+2025.zip
+__pycache__/

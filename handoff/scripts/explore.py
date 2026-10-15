@@ -1,6 +1,6 @@
 import pandas as pd
 
-df = pd.read_csv("reduced_shots_2008_2024.csv", low_memory=False)
+df = pd.read_csv("reduced_shots.csv", low_memory=False)
 print("Shape:", df.shape)
 print("\nSituations:", df["situation"].unique())
 print("\nSaisons:", sorted(df["season"].unique()))

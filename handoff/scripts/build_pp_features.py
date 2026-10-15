@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-raw = pd.read_csv("reduced_shots_2008_2024.csv", low_memory=False)
+raw = pd.read_csv("reduced_shots.csv", low_memory=False)
 raw["gameDate"] = pd.to_datetime(raw["gameDate"], format="%Y%m%d")
 
 pp = raw[raw["situation"] == "5on4"][["playerId","gameId","playerTeam","gameDate","icetime","I_F_shotsOnGoal"]].copy()
