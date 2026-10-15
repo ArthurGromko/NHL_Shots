@@ -69,71 +69,66 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
     la NB sur 2008-2022, prédit 2023-24 (saison de validation), apprend une
     correction mu → mu' (log-linéaire et isotonique) sur cette saison, puis
     l'évalue sur le test avec les prédictions du modèle principal.
-    → `recalibration.pkl` (correction retenue : isotonique)
+    → `recalibration.pkl`. **Diagnostic seulement — non appliqué en v4**
+    (voir "Recalibration" ci-dessous).
 
-## Résultats actuels (v3 — ajout de la saison 2025-26, split décalé d'une saison)
+## Résultats actuels (v4 — saison 2025-26 ajoutée + log des features de tirs)
 
 - **Features finales retenues** (15 features, voir `model_artifacts/final_features.json`) :
-  `shots_avg_last5`, `shots_career_avg`, `toi_avg_last10`, `pp_usage_rank_team`,
-  `shots_per60_avg_last10`, `games_played_before`, `days_rest`,
-  `team_pace_shots_for_last10`, `team_defense_shots_against_last10`,
+  `log_shots_avg_last5`, `log_shots_career_avg`, `toi_avg_last10`,
+  `pp_usage_rank_team`, `log_shots_per60_avg_last10`, `games_played_before`,
+  `days_rest`, `team_pace_shots_for_last10`, `team_defense_shots_against_last10`,
   `position_D`, `position_L`, `position_R`, `home_or_away_HOME`,
   `toi_avg_last10_x_D`, `pp_usage_rank_team_x_D`.
+  Les trois features de volume de tirs sont en `log(x + 0,25)` depuis v4
+  (voir point d'attention 6).
 
 - **Comparaison des modèles (test 2024-25 + 2025-26, n=94 215 ; train 2008-09 à 2023-24, n=680 093)** :
 
   | Modèle | MAE test | Brier score (Over 2,5) |
   |---|---|---|
   | Baseline (moyenne de ligue) | 1,1948 | 0,1715 |
-  | Poisson (sklearn) | 1,0198 | 0,1484 |
-  | NB (scipy maison / statsmodels) | 1,0193 | 0,1484 |
+  | Poisson (sklearn) | 1,0194 | 0,1481 |
+  | NB (scipy maison / statsmodels) | 1,0193 | 0,1482 |
   | XGBoost (objectif Poisson) | 1,0200 | 0,1480 |
   | LightGBM (objectif Poisson) | 1,0205 | 0,1480 |
 
-  Amélioration relative ~14,7% (MAE) / ~13,5% (Brier) vs baseline naïve.
-  MAE par saison de test (NB) : 1,0229 en 2024-25, 1,0157 en 2025-26 — pas de
-  dégradation sur la saison la plus récente. Les GBM font toujours très
-  légèrement mieux sur le Brier score, avec un écart faible : le signal est
-  déjà bien capturé linéairement.
+  Amélioration relative ~14,7% (MAE) / ~13,6% (Brier) vs baseline naïve.
+  MAE par saison de test (NB) : 1,0233 en 2024-25, 1,0152 en 2025-26 — pas de
+  dégradation sur la saison la plus récente. Les modèles paramétriques sont
+  maintenant au niveau des GBM, y compris sur le haut de la distribution.
   *(v2, split précédent train 2008-2022 / test 2023-2024 : MAE NB 1,0400,
   Brier 0,1545 vs baseline 1,2123 / 0,1803 — les chiffres absolus ne sont pas
   directement comparables car l'ensemble de test a changé.)*
 
-- **Coefficients stables** par rapport à v2 : mêmes signes et ordres de
-  grandeur pour toutes les features, interactions toujours très significatives
-  (statsmodels : z=-15,4 et z=-20,1).
+- **Interactions** toujours très significatives (statsmodels : z=-14,9 pour
+  `toi_avg_last10_x_D`, z=-9,2 pour `pp_usage_rank_team_x_D` — cette
+  dernière plus faible qu'avant, une partie de l'effet étant maintenant
+  captée par la forme log des features de tirs).
 
-- **Alpha (dispersion NB) estimé** : 0,067 — la surdispersion "brute" venait
+- **Alpha (dispersion NB) estimé** : 0,063 — la surdispersion "brute" venait
   surtout de l'hétérogénéité entre joueurs, pas de bruit résiduel une fois les
   features connues.
 
-- **Calibration (brute)** : bonne en moyenne (sous-estimation globale
-  d'environ 1% des tirs), mais mu est **trop resserré** autour de la moyenne :
-  par décile de mu, réel/prédit va de 0,92 (décile bas) à 1,06 (décile 9).
-  La variance autour de mu, elle, colle bien à la NB (alpha=0,067) — c'est
-  donc mu qu'il faut corriger, pas la loi.
+- **Calibration** : par décile de mu, réel/prédit va de 0,97 à 1,04 (v3,
+  features brutes : 0,91 à 1,06). Erreur moyenne par décile de probabilité :
+  0,99 / 1,10 / 0,81 / 0,59 / 0,41 point sur les lignes 0,5 / 1,5 / 2,5 /
+  3,5 / 4,5 (v3 : 1,55 / 1,60 / 1,13 / 0,68 / 0,36). Il reste une
+  **sous-estimation de 2-3 points dans les 3 déciles hauts** (ex. Over 2,5,
+  décile 10 : 51,0% prédit vs 53,9% réel ; Over 3,5 : 31,0% vs 32,8%).
+  Ce biais est conservateur : il peut faire rater des Overs, mais ne crée
+  pas de faux edge.
 
-- **Recalibration isotonique de mu** (`fit_recalibration.py`, apprise sur
-  2023-24, évaluée sur le test 2024-26) — **retenue** :
-
-  | Ligne | Erreur moy. par décile, brut | log-linéaire | isotonique |
-  |---|---|---|---|
-  | 0,5 | 1,55 pt | 1,01 pt | **0,45 pt** |
-  | 1,5 | 1,60 pt | 0,90 pt | **0,67 pt** |
-  | 2,5 | 1,13 pt | 0,86 pt | **0,59 pt** |
-  | 3,5 | 0,68 pt | 0,72 pt | **0,57 pt** |
-  | 4,5 | 0,36 pt | 0,47 pt | **0,31 pt** |
-
-  L'erreur de calibration est environ divisée par 2-3 sur les lignes
-  0,5-2,5 ; Brier et MAE quasiment inchangés (attendu : la recalibration
-  corrige le niveau des probabilités, pas la capacité à classer les joueurs).
-  Ex. Over 2,5, décile 9 : 37,2% prédit vs 40,4% réel en brut → 39,9% vs
-  40,7% après correction. La version log-linéaire (b=1,06) corrige le milieu
-  mais surcorrige le haut de la distribution.
-
-  **Pour la mise en production** : quand le modèle sera ré-entraîné sur
-  toutes les saisons, la correction devra être ré-apprise sur la dernière
-  saison disponible (même procédure, saison de validation décalée).
+- **Recalibration de mu — non retenue** (`fit_recalibration.py`). Apprise sur
+  2023-24 et évaluée sur le test, la version log-linéaire (b=1,10) réduit
+  l'erreur moyenne par décile (0,61 / 0,62 / 0,46 / 0,40 / 0,26 point), mais
+  **surestime à nouveau le haut** : décile 10 de l'Over 3,5 à 34,4% prédit
+  vs 32,8% réel, top 0,1% des prédictions à 4,44 tirs vs 3,96 réels
+  (+12%). L'isotonique est pire sur ce point (+15%). Une correction apprise
+  sur une seule saison ne se transfère pas assez bien ; une erreur
+  conservatrice est préférable pour parier. À réévaluer avec plusieurs
+  saisons de validation (validation glissante) ou une fois les cotes
+  disponibles.
 
 ## Points d'attention identifiés
 
@@ -167,22 +162,27 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
 
 5. **[RÉSOLU] Calibration testée sur d'autres lignes** (0,5 / 1,5 / 2,5 / 3,5 /
    4,5 tirs, `scripts/calibration_multi_line.py`). Le modèle reste calibré
-   en moyenne sur toutes les lignes, mais avec des prédictions trop
-   resserrées (cas à forte probabilité sous-estimés, cas à faible
-   probabilité surestimés — voir "Calibration" ci-dessus). L'edge vs
-   baseline naïve (Brier, v3) est le plus fort au milieu de la distribution
-   (~13,5% sur 1,5 et 2,5 tirs) et plus faible aux extrêmes (~9% sur 0,5,
-   ~10% sur 3,5, ~7% sur 4,5 tirs). NB bat
+   en moyenne sur toutes les lignes ; en v4 il reste une légère
+   sous-estimation des cas à forte probabilité (voir "Calibration"
+   ci-dessus). L'edge vs baseline naïve (Brier, v4) est le plus fort au
+   milieu de la distribution (~13,6% sur 1,5 et 2,5 tirs) et plus faible aux
+   extrêmes (~9% sur 0,5, ~11% sur 3,5, ~8% sur 4,5 tirs). NB bat
    systématiquement Poisson en calibration (pas en Brier) sur toutes les
    lignes, cohérent avec la surdispersion confirmée en début de projet.
 
-6. **Gros tireurs surestimés** : sur le 1% des prédictions les plus hautes
-   (mu ≈ 4), le modèle prédit 4,03 tirs pour 3,64 réels (~+10%) ; sur le
-   0,1% le plus haut, 5,01 pour 3,88. La recalibration isotonique ne corrige
-   pas ce cas (trop peu de points à ce niveau dans la saison de validation).
-   À traiter avant de parier sur les lignes 3,5/4,5 des stars : piste =
-   shrinkage plus fort de `shots_avg_last5` vers la moyenne de carrière, ou
-   plafonnement appris sur plusieurs saisons.
+6. **[RÉSOLU] Gros tireurs surestimés** : en v3, sur le 1% des prédictions
+   les plus hautes (MacKinnon, Kaprizov, Matthews, Pastrnak, Ovechkin...), la
+   NB prédisait 3,92 tirs pour 3,61 réels, et 5,01 pour 3,88 sur le top
+   0,1%, alors que XGBoost/LightGBM étaient justes (3,60 / 4,06). Cause :
+   avec un lien log, les features brutes en tirs font croître mu
+   exponentiellement, et ces joueurs sont extrêmes sur les trois features de
+   tirs à la fois. Correction : `log(x + 0,25)` sur `shots_avg_last5`,
+   `shots_career_avg` et `shots_per60_avg_last10` (mu varie alors comme une
+   puissance de la moyenne de tirs). Résultat sur les mêmes tranches :
+   3,52 prédit vs 3,66 réel (p99-99,9) et 4,04 vs 3,96 (top 0,1%), au
+   niveau des GBM. Testé aussi : log du TOI en plus (pas mieux), features
+   brutes + log en parallèle (MAE à peine meilleur mais top 0,1% encore
+   +15%).
 
 7. **Pas de comparaison au marché** : le modèle donne une probabilité, mais
    il n'y a pour l'instant aucune cote réelle à comparer pour calculer un
@@ -242,7 +242,7 @@ des cotes de marché, via [The Odds API](https://the-odds-api.com).
 - `scripts/` — tous les scripts Python du pipeline, dans l'ordre d'exécution
   (voir section Pipeline ci-dessus).
 - `model_artifacts/` — `final_features.json` (15 features finales),
-  `recalibration.pkl` (correction isotonique de mu), et les
+  et les
   modèles déjà entraînés sur ce feature set : `poisson_model.pkl`,
   `nb_params.pkl` (scipy), `nb_params_sm.pkl` (statsmodels), `scaler.pkl`,
   `xgb_model.pkl`, `lgb_model.pkl`.

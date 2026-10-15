@@ -49,6 +49,18 @@ df_model["toi_avg_last10_x_D"] = df_model["toi_avg_last10"] * df_model["position
 df_model["pp_usage_rank_team_x_D"] = df_model["pp_usage_rank_team"] * df_model["position_D"]
 interaction_cols = ["toi_avg_last10_x_D", "pp_usage_rank_team_x_D"]
 
+# --- Log des features de volume de tirs ---
+# Avec un lien log, une feature brute en tirs fait croître mu exponentiellement :
+# les gros tireurs (extrêmes sur les trois features à la fois) étaient surestimés
+# d'environ 10% sur le top 1% des prédictions, alors que les GBM ne l'étaient pas.
+# En log, mu varie comme une puissance de la moyenne de tirs. +0.25 car un joueur
+# peut avoir 0 tir de moyenne sur ses 5 derniers matchs.
+log_shot_features = {}
+for col in ["shots_avg_last5", "shots_career_avg", "shots_per60_avg_last10"]:
+    df_model[f"log_{col}"] = np.log(df_model[col] + 0.25)
+    log_shot_features[col] = f"log_{col}"
+numeric_features = [log_shot_features.get(c, c) for c in numeric_features]
+
 final_features = numeric_features + dummy_cols + interaction_cols
 
 # --- Split temporel: 2008-2023 = train, 2024-2025 = test ---
