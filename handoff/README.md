@@ -261,12 +261,20 @@ NO_ODDS=1 .venv/bin/python handoff/scripts/run_daily.py    # sans dépenser de c
 - `com.nhlshots.closing` — `fetch_odds.py --closing` toutes les 30 min de
   11 h à 23 h 30 : cotes de fermeture des matchs qui commencent dans les 30
   minutes, une fois par match (log : `logs/closing.log`).
-- Si le Mac dort à l'heure prévue, launchd lance le job au réveil.
+- `com.nhlshots.awake` — `caffeinate -s` en continu : empêche la mise en
+  veille du Mac **sur secteur seulement** (rien sur batterie ; l'écran
+  s'éteint toujours). Nécessaire car le réglage d'origine met le Mac en
+  veille après 1 min d'inactivité, même branché. À laisser couvercle ouvert
+  et branché.
+- Si le Mac dort quand même à l'heure prévue, launchd lance le job une fois
+  au réveil ; s'il est éteint, le job est perdu. Une journée manquée = une
+  journée de cotes perdue (pas d'historique gratuit), mais aucune donnée de
+  matchs perdue (MoneyPuck re-téléchargé en entier à chaque exécution).
 - Les agents lancent directement le Python du projet (`.venv/bin/python`),
   pas `/bin/bash` : sur macOS, un job launchd lancé via bash n'a pas accès
   au dossier Documents ("Operation not permitted"), le Python oui.
 - Désactiver : `launchctl bootout gui/$(id -u)/com.nhlshots.daily` (idem
-  `.closing`) ; lancer à la main : `launchctl kickstart gui/$(id -u)/com.nhlshots.daily`.
+  `.closing`, `.awake`) ; lancer à la main : `launchctl kickstart gui/$(id -u)/com.nhlshots.daily`.
 
 ## Test du modèle (saison 2026-27)
 
