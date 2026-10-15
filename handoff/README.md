@@ -246,6 +246,14 @@ NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
    le temps de glace), retire le vig (normalisation Over+Under), calcule
    edge et EV ; → `odds/edges_<date>.csv`.
 
+**Automatisation** : agent launchd `~/Library/LaunchAgents/com.nhlshots.daily.plist`,
+tous les jours à 13 h (heure du Mac, ET) — après la mise à jour MoneyPuck
+(~midi), avant les matchs du soir. Si le Mac dort à 13 h, launchd lance le
+job au réveil. Logs : `pipeline_run/logs/daily_<date>.log`. Les matchs qui
+ont déjà commencé au moment de l'exécution ne sont pas capturés.
+Désactiver : `launchctl bootout gui/$(id -u)/com.nhlshots.daily` ;
+lancer à la main : `launchctl kickstart gui/$(id -u)/com.nhlshots.daily`.
+
 **Modèle de production** (`fit_production.py`, après `prepare_model_data.py`) :
 même NB, entraînée sur tous les matchs joués (2008 → saison en cours) →
 `prod_scaler.pkl` / `prod_nb_params.pkl`. Pas besoin de la ré-entraîner
@@ -283,9 +291,8 @@ Notes :
    les cotes aux tirs réels (MoneyPuck du lendemain) et compare modèle vs
    marché (Brier, calibration, P&L simulé des edges). Nécessaire pour
    trancher le point d'attention 7 avant tout pari.
-2. Automatiser `run_daily.sh` (cron/launchd) — heure à choisir : après la
-   mise à jour MoneyPuck (~midi) et avant les premiers matchs ; les matchs
-   de l'après-midi le week-end demandent une capture plus tôt.
+2. Capture plus tôt pour les matchs de l'après-midi (week-end), manqués
+   par l'exécution de 13 h.
 3. Modèle séparé pour le cold start des recrues (priors repêchage/junior).
 4. Réfléchir à l'architecture du site web (stack, hosting, comment publier
    les prédictions quotidiennes, stratégie de contenu/SEO pour le trafic).
