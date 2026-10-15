@@ -216,12 +216,15 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
 
 ## Pipeline live (saison 2026-27)
 
-Dans `pipeline_run/`, chaque jour de match :
+`run_daily.py` enchaîne tout, chaque jour de match (log :
+`pipeline_run/logs/daily_<date>.log`) :
 
 ```
-../handoff/scripts/run_daily.sh              # matchs d'aujourd'hui
-NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
+.venv/bin/python handoff/scripts/run_daily.py              # matchs d'aujourd'hui
+NO_ODDS=1 .venv/bin/python handoff/scripts/run_daily.py    # sans dépenser de crédits
 ```
+
+0. **grade_results.py** — note les jours précédents (voir "Test du modèle").
 
 1. **update_live_data.py** — télécharge le fichier MoneyPuck de la saison en
    cours (`extracted/<saison>.csv`, mis à jour vers midi avec les matchs de
@@ -249,14 +252,62 @@ NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
 5. **compare_odds.py** — associe les noms (normalisés, homonymes résolus par
    le temps de glace), retire le vig (normalisation Over+Under), calcule
    edge et EV ; → `odds/edges_<date>.csv`.
+6. **make_picks.py** — picks du jour, figés (voir "Test du modèle").
 
-**Automatisation** : agent launchd `~/Library/LaunchAgents/com.nhlshots.daily.plist`,
-tous les jours à 13 h (heure du Mac, ET) — après la mise à jour MoneyPuck
-(~midi), avant les matchs du soir. Si le Mac dort à 13 h, launchd lance le
-job au réveil. Logs : `pipeline_run/logs/daily_<date>.log`. Les matchs qui
-ont déjà commencé au moment de l'exécution ne sont pas capturés.
-Désactiver : `launchctl bootout gui/$(id -u)/com.nhlshots.daily` ;
-lancer à la main : `launchctl kickstart gui/$(id -u)/com.nhlshots.daily`.
+**Automatisation** (agents launchd dans `~/Library/LaunchAgents/`) :
+- `com.nhlshots.daily` — `run_daily.py` tous les jours à 13 h (ET) : après la
+  mise à jour MoneyPuck (~midi), avant les matchs du soir. Les matchs déjà
+  commencés à ce moment ne sont pas capturés.
+- `com.nhlshots.closing` — `fetch_odds.py --closing` toutes les 30 min de
+  11 h à 23 h 30 : cotes de fermeture des matchs qui commencent dans les 30
+  minutes, une fois par match (log : `logs/closing.log`).
+- Si le Mac dort à l'heure prévue, launchd lance le job au réveil.
+- Les agents lancent directement le Python du projet (`.venv/bin/python`),
+  pas `/bin/bash` : sur macOS, un job launchd lancé via bash n'a pas accès
+  au dossier Documents ("Operation not permitted"), le Python oui.
+- Désactiver : `launchctl bootout gui/$(id -u)/com.nhlshots.daily` (idem
+  `.closing`) ; lancer à la main : `launchctl kickstart gui/$(id -u)/com.nhlshots.daily`.
+
+## Test du modèle (saison 2026-27)
+
+Trois mesures, de la plus rapide à la plus lente, calculées par
+`grade_results.py` dès que MoneyPuck a les résultats (le lendemain) :
+
+1. **Toutes les lignes capturées, modèle vs marché** (`graded/lines_<date>.csv`)
+   — Brier et log loss du P(Over) du modèle et de la probabilité juste du
+   marché (vig retiré), sur ~200-400 lignes par soir ; taux réel d'Over vs
+   moyenne modèle vs moyenne marché, par ligne. Le test principal : il dit
+   en quelques semaines qui est le plus juste, et d'où vient l'écart de ~5
+   points (point d'attention 7). Joueur qui ne joue pas = ligne annulée.
+2. **CLV des picks** — prix pris à 13 h évalué avec la probabilité juste de
+   fermeture (Pinnacle si elle cote la ligne, sinon moyenne des
+   bookmakers ; capture 0-30 min avant le match) :
+   `clv = prix × P_fermeture − 1`, > 0 = on a battu la fermeture. Bien
+   moins bruité que le gain/perte ; le standard pour juger un edge.
+3. **Paper trading** (`picks/picks_<date>.csv`, notés dans
+   `graded/picks_<date>.csv`) — règles fixées d'avance dans
+   `make_picks.py` : seulement les lignes cotées par **Pinnacle, au prix
+   Pinnacle** (un livre où l'utilisateur parie, le plus sharp, et pas de
+   lignes alternatives à un seul livre), EV ≥ 5 %, un pari par joueur, au
+   plus 10 par jour, mise fixe 1 u. Deux
+   portefeuilles : modèle brut et modèle avec l'écart moyen au marché
+   retiré. Fichier figé à 13 h, jamais réécrit. Le gain/perte est le moins
+   précis des trois : à ~1,9 de cote, ± 12 points de ROI après un mois,
+   ± 5 après une saison.
+
+Historique des règles : le 15 oct. 2026, première version des picks au
+prix médian entre bookmakers → les 20 picks venaient de lignes alternatives
+cotées par un seul livre (theScore Bet, Hard Rock) à des prix longs (2,45 à
+4,60), où le biais bas du modèle donnait des EV de +30 à +75 %. Règle
+changée pour "Pinnacle seulement" et picks du jour régénérés **avant le
+début des matchs** (aucun résultat connu).
+
+Décision après 4-6 semaines : sans précision au moins égale au marché (1)
+et CLV positive (2), le résultat du paper trading n'est que de la chance.
+
+Crédits : capture de 13 h + fermeture ≈ 2 crédits par match, ~420-470 par
+mois selon le calendrier, sous les 500 du tier gratuit mais sans grande
+marge (`fetch_odds.py` s'arrête sous 20 crédits restants).
 
 **Modèle de production** (`fit_production.py`, après `prepare_model_data.py`) :
 même NB, entraînée sur tous les matchs joués (2008 → saison en cours) →
@@ -276,9 +327,10 @@ Notes :
   (489 restants au 15 oct. 2026).
 - Bookmakers : l'utilisateur parie sur **bet365 et Pinnacle**. bet365 n'est
   pas couvert par The Odds API (seulement `bet365_au`, payant, AFL/NRL).
-  Pinnacle (région `eu`) est demandé à chaque capture, mais n'avait aucune
-  prop de tirs NHL lors du test du 15 oct. à ~1 h (FanDuel, BetOnline et
-  theScore Bet oui) — à confirmer sur les captures de 13 h. La doc indique
+  Pinnacle (région `eu`) est demandé à chaque capture : aucune prop de tirs
+  NHL à ~1 h du matin le 15 oct., mais 159 joueurs sur les 11 matchs à 13 h
+  (il publie dans la journée). Capture de 13 h du 15 oct. : 8 bookmakers,
+  ~3 000 cotes. La doc indique
   que les props sont "mainly limited to US sports and US bookmakers".
 - `certifi` ajouté au venv (le Python de python.org sur macOS n'a pas de
   certificats SSL par défaut).
