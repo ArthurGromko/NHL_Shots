@@ -37,9 +37,15 @@ today["mu"] = np.exp(np.clip(X @ nb["beta"], -20, 20))
 r = 1.0 / nb["alpha"]
 for line in LINES:
     today[f"p_over_{line}"] = 1 - nbinom.cdf(int(np.floor(line)), r, r / (r + today["mu"]))
+    # Cote juste (décimale) selon le modèle, pour comparer à la main avec un bookmaker
+    # non couvert par The Odds API (bet365): une cote offerte au-dessus = EV positive
+    # si le modèle a raison
+    today[f"fair_over_{line}"] = 1 / today[f"p_over_{line}"]
+    today[f"fair_under_{line}"] = 1 / (1 - today[f"p_over_{line}"])
 
 cols = ["gameId", "gameDate", "name", "playerId", "playerTeam", "opposingTeam", "home_or_away", "position",
         "mu"] + [f"p_over_{l}" for l in LINES] + \
+       [f"fair_{side}_{l}" for l in LINES for side in ("over", "under")] + \
        ["shots_avg_last5", "shots_career_avg", "toi_avg_last10", "pp_usage_rank_team", "games_played_before"]
 out = today[cols].sort_values("mu", ascending=False)
 
@@ -48,4 +54,5 @@ path = f"predictions/predictions_{upcoming['date']}.csv"
 out.to_csv(path, index=False)
 print(f"{len(out)} joueurs prédits -> {path}")
 print(f"(modèle entraîné jusqu'au {nb['last_game_date']}, MoneyPuck à jour jusqu'au {upcoming['moneypuck_last_game']})\n")
-print(out.head(15)[["name", "playerTeam", "opposingTeam", "mu", "p_over_2.5", "p_over_3.5"]].round(3).to_string(index=False))
+print(out.head(15)[["name", "playerTeam", "opposingTeam", "mu", "p_over_2.5", "fair_over_2.5", "fair_under_2.5"]]
+      .round(3).to_string(index=False))

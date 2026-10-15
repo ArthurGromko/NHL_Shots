@@ -237,7 +237,11 @@ NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
    peut pas polluer l'historique d'entraînement).
 3. **predict_today.py** — applique `make_model_frame()` et le modèle de
    production ; → `predictions/predictions_<date>.csv` (mu et P(Over) pour
-   0,5 à 4,5 tirs).
+   0,5 à 4,5 tirs, et cotes justes décimales `fair_over_<ligne>` /
+   `fair_under_<ligne>` = 1/P, pour comparer à la main avec bet365 : une cote
+   offerte au-dessus de la cote juste a une EV positive si le modèle a
+   raison. Tant que le biais de ~5 points sous le marché n'est pas résolu,
+   les cotes justes Over sont trop hautes et les Under trop basses).
 4. **fetch_odds.py** — cotes `player_shots_on_goal` (The Odds API, liste de
    10 bookmakers nommés dont Pinnacle — même coût qu'une région, 1 crédit par match, matchs pas encore commencés seulement ; `--dry-run`
    pour ne rien dépenser). Brut → `odds/raw/<date>/`, à plat →
