@@ -259,13 +259,17 @@ NO_ODDS=1 .venv/bin/python handoff/scripts/run_daily.py    # sans dépenser de c
   mise à jour MoneyPuck (~midi), avant les matchs du soir. Les matchs déjà
   commencés à ce moment ne sont pas capturés.
 - `com.nhlshots.closing` — `fetch_odds.py --closing` toutes les 30 min de
-  11 h à 23 h 30 : cotes de fermeture des matchs qui commencent dans les 30
+  13 h à 22 h (la dernière couvre les matchs jusqu'à 22 h 30 ; avant 13 h
+  inutile, les matchs déjà commencés à 13 h n'ont pas de picks) : cotes de fermeture des matchs qui commencent dans les 30
   minutes, une fois par match (log : `logs/closing.log`).
-- `com.nhlshots.awake` — `caffeinate -s` en continu : empêche la mise en
-  veille du Mac **sur secteur seulement** (rien sur batterie ; l'écran
-  s'éteint toujours). Nécessaire car le réglage d'origine met le Mac en
-  veille après 1 min d'inactivité, même branché. À laisser couvercle ouvert
-  et branché.
+- `com.nhlshots.awake` — `caffeinate -s` de 11 h 59 à 22 h 05 : empêche
+  la mise en veille du Mac **sur secteur seulement** (rien sur batterie ;
+  l'écran s'éteint toujours). Nécessaire car le réglage d'origine met le
+  Mac en veille après 1 min d'inactivité, même branché. Le Mac est réveillé
+  à 11 h 59 par un réveil programmé macOS, à configurer une fois avec
+  `sudo pmset repeat wakeorpoweron MTWRFSU 11:59:00` (vérifier avec
+  `pmset -g sched`, annuler avec `sudo pmset repeat cancel`). À laisser
+  couvercle ouvert et branché.
 - Si le Mac dort quand même à l'heure prévue, launchd lance le job une fois
   au réveil ; s'il est éteint, le job est perdu. Une journée manquée = une
   journée de cotes perdue (pas d'historique gratuit), mais aucune donnée de
