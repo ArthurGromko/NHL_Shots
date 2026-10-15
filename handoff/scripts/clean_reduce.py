@@ -1,4 +1,4 @@
-import glob
+import glob, sys
 import pandas as pd
 
 cols_needed = [
@@ -13,6 +13,9 @@ cols_needed = [
 chunksize = 200_000
 # tous les CSV MoneyPuck de extracted/ (2008_to_2024.csv + une saison par fichier ensuite)
 input_files = sorted(glob.glob("extracted/*.csv"))
+# --upcoming: ajoute les lignes des matchs du jour (update_live_data.py), pour les prédictions
+if "--upcoming" in sys.argv:
+    input_files.append("upcoming_rows.csv")
 print("Fichiers source:", input_files)
 
 def read_chunks():

@@ -48,7 +48,10 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
    filtre des matchs "zéro" (premier match de carrière, pas d'historique
    disponible — 3 059 lignes, flag `games_played_before==0`), encodage
    catégoriel, et construction des termes d'interaction position×feature.
-   → `model_train_clean.csv` / `model_test_clean.csv` (15 features finales)
+   → `model_train_clean.csv` / `model_test_clean.csv` (15 features finales),
+   + `model_all_clean.csv` (tous les matchs joués, saison en cours comprise,
+   pour le modèle de production). Les transformations sont dans
+   `make_model_frame()`, réutilisée telle quelle par `predict_today.py`.
 10. **fit_poisson.py** — modèle Poisson baseline (scikit-learn PoissonRegressor).
 11. **fit_negbinom.py** — modèle binomiale négative maison (MLE via
     scipy.optimize, utile si `statsmodels` n'est pas disponible).
@@ -184,9 +187,19 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
    brutes + log en parallèle (MAE à peine meilleur mais top 0,1% encore
    +15%).
 
-7. **Pas de comparaison au marché** : le modèle donne une probabilité, mais
-   il n'y a pour l'instant aucune cote réelle à comparer pour calculer un
-   edge. Voir "Cotes de marché" ci-dessous.
+7. **Modèle ~5 points sous le marché** (première capture de cotes, 15 oct.
+   2026, 215 lignes bookmaker × joueur × ligne) : P(Over) du modèle en
+   moyenne 5 points sous la probabilité "juste" du marché, sur toutes les
+   lignes, les deux bookmakers et tous les niveaux de mu → 61% des Unders
+   ont une EV > 0 contre 8% des Overs. Ce n'est **pas** un edge exploitable
+   en l'état. Pas de dérive de ligue (2026-27 : 1,50 tir/match réel vs 1,48
+   prédit). Explications probables : (a) la sous-estimation connue du haut
+   de la distribution — sur le quintile supérieur de 2026-27, 2,42 prédit
+   vs 2,54 réel, or ce sont les joueurs cotés ; (b) des cotes Over gonflées
+   par les bookmakers (le public parie surtout les Overs), ce qui fausse le
+   retrait du vig par simple normalisation. **Impossible à trancher sans résultats** : il faut d'abord
+   noter les cotes capturées contre les tirs réels (Brier modèle vs marché)
+   sur quelques semaines. **Ne pas parier sur ces edges avant.**
 
 ## Environnement / contraintes techniques
 
@@ -201,41 +214,80 @@ dossier contenant les CSV dézippés dans `extracted/` (`2008_to_2024.csv`,
   la version à privilégier en local (résultats identiques + tests
   statistiques complets).
 
-## Cotes de marché (en cours)
+## Pipeline live (saison 2026-27)
 
-Objectif : calculer un edge réel en comparant les probabilités du modèle à
-des cotes de marché, via [The Odds API](https://the-odds-api.com).
+Dans `pipeline_run/`, chaque jour de match :
+
+```
+../handoff/scripts/run_daily.sh              # matchs d'aujourd'hui
+NO_ODDS=1 ../handoff/scripts/run_daily.sh    # sans dépenser de crédits
+```
+
+1. **update_live_data.py** — télécharge le fichier MoneyPuck de la saison en
+   cours (`extracted/<saison>.csv`, mis à jour vers midi avec les matchs de
+   la veille), lit le calendrier et les rosters via l'API NHL
+   (`api-web.nhle.com`), et écrit `upcoming_rows.csv` : une ligne par joueur
+   probable des matchs du jour (roster actuel, a joué dans les 30 derniers
+   jours), stats de tirs vides. Comme toutes les features sont décalées, les
+   scripts de features existants calculent pour ces lignes les features
+   d'entrée du match sans modification. Prévient si des matchs déjà joués
+   manquent encore dans MoneyPuck. Écrit aussi `upcoming_games.json`.
+2. **clean_reduce.py --upcoming** puis les scripts de features (étapes 4-7).
+   Sans `--upcoming`, ces lignes ne sont jamais incluses (un vieux fichier ne
+   peut pas polluer l'historique d'entraînement).
+3. **predict_today.py** — applique `make_model_frame()` et le modèle de
+   production ; → `predictions/predictions_<date>.csv` (mu et P(Over) pour
+   0,5 à 4,5 tirs).
+4. **fetch_odds.py** — cotes `player_shots_on_goal` (The Odds API, région us,
+   1 crédit par match, matchs pas encore commencés seulement ; `--dry-run`
+   pour ne rien dépenser). Brut → `odds/raw/<date>/`, à plat →
+   `odds/odds_<date>.csv`. S'arrête s'il reste moins de 20 crédits.
+5. **compare_odds.py** — associe les noms (normalisés, homonymes résolus par
+   le temps de glace), retire le vig (normalisation Over+Under), calcule
+   edge et EV ; → `odds/edges_<date>.csv`.
+
+**Modèle de production** (`fit_production.py`, après `prepare_model_data.py`) :
+même NB, entraînée sur tous les matchs joués (2008 → saison en cours) →
+`prod_scaler.pkl` / `prod_nb_params.pkl`. Pas besoin de la ré-entraîner
+chaque jour (les features, elles, sont à jour quotidiennement) ; une fois par
+mois suffit.
+
+Notes :
+- Noms des joueurs du jour tirés du roster NHL : MoneyPuck perd les accents
+  (« Tim Sttzle », « Alexis Lafrenire »), ce qui cassait l'association avec
+  les noms des cotes.
+- Joueurs blessés mais encore au roster : prédits quand même ; ils
+  disparaissent à l'association avec les cotes (pas de prop). Ils peuvent
+  décaler un peu `pp_usage_rank_team` de leurs coéquipiers.
+- Crédits : ~1 312 matchs/saison ≈ 220 crédits/mois pour une capture par
+  match, sous les 500 du tier gratuit. Première capture : 11 crédits
+  (489 restants au 15 oct. 2026).
+- `certifi` ajouté au venv (le Python de python.org sur macOS n'a pas de
+  certificats SSL par défaut).
+
+## Cotes de marché — historique de la décision
 
 - Le marché `player_shots_on_goal` (NHL, bookmakers US) existe bien sur
-  cette API, avec un sport key `icehockey_nhl`.
+  The Odds API, avec un sport key `icehockey_nhl`.
 - **L'endpoint historique nécessite un plan payant** (confirmé
   empiriquement : `HISTORICAL_UNAVAILABLE_ON_FREE_USAGE_PLAN` sur le tier
-  gratuit, malgré une doc publique qui suggérait le contraire). Le tier
-  payant le moins cher est 30$/mois (20K crédits) — pas retenu pour
-  l'instant, décision de l'utilisateur de ne pas payer.
-- **Pas d'alternative gratuite trouvée** : recherche faite sur Kaggle,
-  BigDataBall, Princeton DSS, MoneyPuck, PropCruncher, Shot Propz, Odds
-  Shark — soit ce sont des données de résultats réels (shots on goal en
-  tant que stat de jeu, qu'on a déjà via MoneyPuck), soit des cotes de
-  match (moneyline/total, pas de player props), soit des outils d'affichage
-  live sans export ni archive. Les cotes historiques de player props ne
-  semblent archivées nulle part gratuitement (marché encore récent, ~2021+).
-- **Décision** : reporté au début de la saison 2026-2027 (octobre). Le tier
-  gratuit de The Odds API donne accès aux cotes **live** (pas historiques),
-  donc le plan est de scraper `player_shots_on_goal` au jour le jour dès le
-  début de saison pour construire notre propre historique, gratuitement,
-  et comparer aux prédictions du modèle au fil de l'eau. Scraper encore à
-  écrire le moment venu (clé API déjà obtenue et testée, stockée hors dépôt
-  git dans `pipeline_run/.env`, sport key et market key confirmés).
+  gratuit). Le tier payant le moins cher est 30$/mois — pas retenu.
+- **Pas d'alternative gratuite trouvée** (Kaggle, BigDataBall, Princeton
+  DSS, MoneyPuck, PropCruncher, Shot Propz, Odds Shark).
+- **Décision** : construire notre propre historique en capturant les cotes
+  live chaque jour depuis octobre 2026 (voir "Pipeline live").
 
 ## Prochaines étapes suggérées
 
-1. **Octobre 2026 (début de saison)** : écrire le scraper live
-   `player_shots_on_goal` (The Odds API, tier gratuit) et commencer à
-   construire un historique de cotes réelles pour comparer aux
-   prédictions du modèle et calculer un edge au fil de la saison.
-2. Modèle séparé pour le cold start des recrues (priors repêchage/junior).
-3. Réfléchir à l'architecture du site web (stack, hosting, comment publier
+1. **Noter les résultats** : script qui, pour chaque date capturée, relie
+   les cotes aux tirs réels (MoneyPuck du lendemain) et compare modèle vs
+   marché (Brier, calibration, P&L simulé des edges). Nécessaire pour
+   trancher le point d'attention 7 avant tout pari.
+2. Automatiser `run_daily.sh` (cron/launchd) — heure à choisir : après la
+   mise à jour MoneyPuck (~midi) et avant les premiers matchs ; les matchs
+   de l'après-midi le week-end demandent une capture plus tôt.
+3. Modèle séparé pour le cold start des recrues (priors repêchage/junior).
+4. Réfléchir à l'architecture du site web (stack, hosting, comment publier
    les prédictions quotidiennes, stratégie de contenu/SEO pour le trafic).
 
 ## Fichiers inclus dans ce transfert
@@ -245,7 +297,9 @@ des cotes de marché, via [The Odds API](https://the-odds-api.com).
   et les
   modèles déjà entraînés sur ce feature set : `poisson_model.pkl`,
   `nb_params.pkl` (scipy), `nb_params_sm.pkl` (statsmodels), `scaler.pkl`,
-  `xgb_model.pkl`, `lgb_model.pkl`.
+  `xgb_model.pkl`, `lgb_model.pkl` (entraînés sur 2008-2023, pour
+  l'évaluation), et le modèle de production `prod_scaler.pkl` /
+  `prod_nb_params.pkl` (entraîné sur tous les matchs jusqu'au 13 oct. 2026).
 - Les CSV intermédiaires (jusqu'à 2,6 Go pour le CSV brut extrait) ne sont
   **pas inclus** — ils sont entièrement reproductibles en ré-exécutant les
   scripts sur le fichier `2008_to_2024.zip` original (également exclu du
