@@ -14,10 +14,15 @@ import pandas as pd
 # Deux portefeuilles: "brut" (probabilités du modèle telles quelles) et "ecart_retire" (modèle
 # décalé de son écart moyen au marché sur la ligne, calculé sur le slate du jour).
 # -> picks/picks_<date>.csv, jamais réécrit une fois créé.
+# Changement du 2026-10-19 (picks à partir du 2026-10-20): plus d'Unders sur les lignes >= 3,5.
+# Le modèle sous-estime les gros tireurs (README, point 7a; en live sur 15-18 oct.: 23,7% d'Over
+# prédit vs 30,3% réel sur 3,5), ce qui produit des Unders à EV gonflée sur ces lignes. Mesure
+# temporaire, à retirer quand une recalibration apprise sur les lignes notées sera en place.
 
 BOOK = "pinnacle"
 MIN_EV = 0.05
 MAX_PICKS = 10
+NO_UNDER_FROM_LINE = 3.5
 
 
 def main():
@@ -53,6 +58,7 @@ def main():
             g.assign(side="Under", price=g["price_under"], p_model=1 - g[p_col], p_market=1 - g["p_market_over"]),
         ])
         sides["ev"] = sides["p_model"] * sides["price"] - 1
+        sides = sides[~((sides["side"] == "Under") & (sides["line"] >= NO_UNDER_FROM_LINE))]
         best = (sides[sides["ev"] >= MIN_EV].sort_values("ev", ascending=False)
                 .drop_duplicates("playerId").head(MAX_PICKS))
         picks.append(best.assign(portfolio=portfolio))

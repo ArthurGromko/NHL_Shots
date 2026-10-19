@@ -103,7 +103,13 @@ def summary():
     if len(pin):
         print(f"Lignes Pinnacle seulement ({len(pin)}): Brier modèle {brier(pin['p_model_over'], pin['over']):.4f} "
               f"| Pinnacle {brier(pin['p_market_over'], pin['over']):.4f}")
-    by_line = lines.groupby("line").apply(lambda d: pd.Series({
+    # par ligne: une seule rangée par joueur x match x ligne (marché = moyenne des bookmakers), sinon
+    # un joueur coté par 6 livres pèse 6 fois et quelques gros tireurs faussent les lignes hautes
+    per_line = (lines.groupby(["gameId", "playerId", "line"])
+                .agg(over=("over", "first"), p_model_over=("p_model_over", "first"),
+                     p_market_over=("p_market_over", "mean")).reset_index())
+    print(f"Par ligne ({len(per_line)} joueur x match x ligne, marché = moyenne des bookmakers):")
+    by_line = per_line.groupby("line").apply(lambda d: pd.Series({
         "n": len(d), "reel": d["over"].mean(), "modele": d["p_model_over"].mean(),
         "marche": d["p_market_over"].mean(),
         "brier_modele": brier(d["p_model_over"], d["over"]), "brier_marche": brier(d["p_market_over"], d["over"]),
