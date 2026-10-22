@@ -25,6 +25,18 @@ def fair_over(price_over, price_under):
     return inv_o / (inv_o + inv_u)
 
 
+def closing_fair(day):
+    """Probabilité juste (vig retiré) d'Over à la fermeture, par match x bookmaker x joueur x ligne, ou None."""
+    path = f"odds/closing_{day}.csv"
+    if not os.path.exists(path):
+        return None
+    c = pd.read_csv(path)
+    c = c.pivot_table(index=["gameId", "bookmaker", "player", "line"], columns="side",
+                      values="price", aggfunc="last").reset_index().dropna(subset=["Over", "Under"])
+    c["p_close_over"] = fair_over(c["Over"], c["Under"])
+    return c
+
+
 def grade_day(day):
     edges = pd.read_csv(f"odds/edges_{day}.csv")
     shots = actual_shots(day)
@@ -51,12 +63,8 @@ def grade_day(day):
 
         # CLV: probabilité juste de fermeture (vig retiré) sur la même ligne: celle de Pinnacle
         # si elle cote la ligne à la fermeture (référence sharp), sinon la moyenne des bookmakers
-        closing_path = f"odds/closing_{day}.csv"
-        if os.path.exists(closing_path):
-            c = pd.read_csv(closing_path)
-            c = c.pivot_table(index=["gameId", "bookmaker", "player", "line"], columns="side",
-                              values="price", aggfunc="last").reset_index().dropna(subset=["Over", "Under"])
-            c["p_close_over"] = fair_over(c["Over"], c["Under"])
+        c = closing_fair(day)
+        if c is not None:
             keys = ["gameId", "player", "line"]
             pin = c[c["bookmaker"] == "pinnacle"].groupby(keys)["p_close_over"].mean().rename("p_close_pin")
             avg = c.groupby(keys)["p_close_over"].mean().rename("p_close_avg")
@@ -84,6 +92,34 @@ def brier(p, y):
 def log_loss(p, y):
     p = np.clip(p, 1e-6, 1 - 1e-6)
     return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+
+def movement(files):
+    # Mouvement Pinnacle entre la capture de 13 h et la fermeture, sur toutes les lignes notées.
+    # La CLV des picks est surtout la marge Pinnacle (les lignes bougent peu); ce qui compte est
+    # le sens: si le marché va vers le modèle plus d'une fois sur deux, le modèle voit quelque
+    # chose que le marché intègre ensuite. Point de décision vers le 1er nov.: ~50% -> arrêter
+    # la capture de fermeture (elle double les crédits Odds API), > ~58% -> la garder.
+    rows = []
+    for f in files:
+        c = closing_fair(f[-14:-4])
+        if c is None:
+            continue
+        l = pd.read_csv(f)
+        l = l[(l["bookmaker"] == "pinnacle") & ~l["void"].astype(bool)]
+        rows.append(l.merge(c[c["bookmaker"] == "pinnacle"][["gameId", "player", "line", "p_close_over"]],
+                            on=["gameId", "player", "line"]))
+    if not rows:
+        return
+    d = pd.concat(rows)
+    move = d["p_close_over"] - d["p_market_over"]
+    moved = move.abs() > 0.005
+    toward_model = (np.sign(move) == np.sign(d["p_model_over"] - d["p_market_over"]))[moved]
+    print(f"\n=== Mouvement Pinnacle 13 h -> fermeture ({len(d)} lignes) ===")
+    print(f"Mouvement moyen {100 * move.abs().mean():.2f} pt | {moved.mean():.0%} des lignes bougent de plus de 0,5 pt "
+          f"| vers le modèle: {toward_model.mean():.0%} des {int(moved.sum())} lignes qui bougent")
+    print(f"Brier Pinnacle 13 h {brier(d['p_market_over'], d['over']):.4f} | fermeture "
+          f"{brier(d['p_close_over'], d['over']):.4f} | modèle {brier(d['p_model_over'], d['over']):.4f}")
 
 
 def summary():
@@ -115,6 +151,8 @@ def summary():
         "brier_modele": brier(d["p_model_over"], d["over"]), "brier_marche": brier(d["p_market_over"], d["over"]),
     }), include_groups=False)
     print(by_line.round(4).to_string())
+
+    movement(files)
 
     pick_files = sorted(glob.glob("graded/picks_*.csv"))
     if not pick_files:
