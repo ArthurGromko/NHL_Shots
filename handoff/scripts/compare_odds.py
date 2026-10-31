@@ -1,12 +1,39 @@
-import argparse, json, pickle, re, unicodedata
+import argparse, glob, json, pickle, re, unicodedata
+from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 from scipy.stats import nbinom
+from update_live_data import season_for
 
 # Compare les cotes capturées (fetch_odds.py) aux prédictions du jour (predict_today.py).
 # Pour chaque (bookmaker, joueur, ligne): probabilité "juste" du marché (vig retiré en
 # normalisant Over+Under), probabilité du modèle, edge et espérance de gain par mise de 1.
 # -> odds/edges_<date>.csv
+#
+# p_recal_over (ajout du 2026-10-30): modèle recalibré, mu multiplié par le ratio tirs réels /
+# mu prédit sur les RECAL_DAYS jours précédents (tous les joueurs prédits, pas seulement les
+# lignes cotées). En live, le modèle sous-estimait tout le monde d'environ 4% (6,6% sur
+# 15-22 oct., 1,7% sur 23-29 oct.), sans dépendance au niveau de mu (log mu' = a + b log mu
+# donne b = 1,01): un simple facteur suffit, et une fenêtre glissante suit sa décroissance.
+
+RECAL_DAYS = 14
+RECAL_MIN_ROWS = 500  # en dessous (début de saison), pas de correction
+
+
+def recal_factor(day, mp=None):
+    """(facteur, n joueur-matchs) appris sur les RECAL_DAYS jours avant `day`, sans regarder `day`."""
+    start = (date.fromisoformat(day) - timedelta(days=RECAL_DAYS)).isoformat()
+    files = [f for f in glob.glob("predictions/predictions_*.csv") if start <= f[-14:-4] < day]
+    if not files:
+        return 1.0, 0
+    if mp is None:
+        mp = pd.read_csv(f"extracted/{season_for(date.fromisoformat(day))}.csv",
+                         usecols=["playerId", "gameId", "situation", "icetime", "I_F_shotsOnGoal"])
+    mp = mp[(mp["situation"] == "all") & (mp["icetime"] > 0)]
+    d = pd.concat(map(pd.read_csv, files)).merge(mp, on=["gameId", "playerId"])
+    if len(d) < RECAL_MIN_ROWS:
+        return 1.0, len(d)
+    return d["I_F_shotsOnGoal"].sum() / d["mu"].sum(), len(d)
 
 
 def norm(s):
@@ -80,11 +107,15 @@ def main():
     wide["edge_over"] = wide["p_model_over"] - wide["p_market_over"]
     wide["ev_over"] = wide["p_model_over"] * wide["price_over"] - 1
     wide["ev_under"] = (1 - wide["p_model_over"]) * wide["price_under"] - 1
+    k, n_recal = recal_factor(args.date)
+    wide["recal_factor"] = k
+    wide["p_recal_over"] = 1 - nbinom.cdf(np.floor(wide["line"]), r, r / (r + k * wide["mu"]))
 
     path = f"odds/edges_{args.date}.csv"
     wide.sort_values("edge_over", ascending=False).to_csv(path, index=False)
     print(f"{len(wide)} lignes (bookmaker x joueur x ligne), {wide['playerId'].nunique()} joueurs -> {path}")
-    print(f"Vig médian: {wide['vig'].median():.1%}\n")
+    print(f"Vig médian: {wide['vig'].median():.1%}")
+    print(f"Recalibration: mu x {k:.3f} ({n_recal} joueur-matchs sur les {RECAL_DAYS} jours précédents)\n")
 
     # Meilleure espérance par joueur/ligne/côté, tous bookmakers confondus
     best = pd.concat([

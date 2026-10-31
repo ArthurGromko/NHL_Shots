@@ -1,7 +1,10 @@
-import argparse, glob, os
+import argparse, glob, os, pickle
 from datetime import date
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
+from scipy.stats import nbinom
+from compare_odds import recal_factor
 from update_live_data import season_for
 
 # Note les jours capturés une fois leurs matchs présents dans MoneyPuck (le lendemain midi).
@@ -122,11 +125,41 @@ def movement(files):
           f"{brier(d['p_close_over'], d['over']):.4f} | modèle {brier(d['p_model_over'], d['over']):.4f}")
 
 
+def versions(lines):
+    # Modèle brut vs recalibré (facteur glissant de compare_odds.py, recalculé ici pour les jours
+    # d'avant son ajout) vs mélange modèle recalibré / marché vs marché. Le mélange est une
+    # régression logistique sur les logits; chaque jour est prédit avec les poids appris sur les
+    # autres jours. Il sert à suivre la précision, pas à parier: il colle trop au marché pour
+    # dépasser la marge de Pinnacle.
+    with open("prod_nb_params.pkl", "rb") as f:
+        r = 1.0 / pickle.load(f)["alpha"]
+    mp = pd.read_csv(f"extracted/{season_for(date.today())}.csv",
+                     usecols=["playerId", "gameId", "situation", "icetime", "I_F_shotsOnGoal"])
+    lines = lines.reset_index(drop=True)
+    k = {d: recal_factor(d, mp)[0] for d in lines["day"].unique()}
+    lines = lines.assign(p_recal=1 - nbinom.cdf(np.floor(lines["line"]), r, r / (r + lines["day"].map(k) * lines["mu"])))
+
+    def logits(d):
+        p = np.clip(d[["p_recal", "p_market_over"]].values, 1e-4, 1 - 1e-4)
+        return sm.add_constant(np.log(p / (1 - p)), has_constant="add")
+    lines["p_blend"] = np.nan
+    for d in lines["day"].unique():
+        train, test = lines["day"] != d, lines["day"] == d
+        fit = sm.GLM(lines.loc[train, "over"], logits(lines[train]), family=sm.families.Binomial()).fit()
+        lines.loc[test, "p_blend"] = fit.predict(logits(lines[test]))
+
+    cols = {"modèle": "p_model_over", "recalibré": "p_recal", "mélange": "p_blend", "marché": "p_market_over"}
+    print(f"\n=== Versions du modèle (facteur de recalibration au dernier jour noté: {k[max(k)]:.3f}) ===")
+    for label, d in [("Toutes les lignes", lines), ("Pinnacle", lines[lines["bookmaker"] == "pinnacle"])]:
+        print(f"{label:17s} ({len(d)}) Brier " + " | ".join(f"{n} {brier(d[c], d['over']):.4f}" for n, c in cols.items())
+              + f"  | P(Over) réel {d['over'].mean():.3f}, recalibré {d['p_recal'].mean():.3f}")
+
+
 def summary():
     files = sorted(glob.glob("graded/lines_*.csv"))
     if not files:
         return
-    lines = pd.concat(map(pd.read_csv, files))
+    lines = pd.concat(pd.read_csv(f).assign(day=f[-14:-4]) for f in files)
     lines = lines[~lines["void"].astype(bool)]
     y = lines["over"].values
     days = f"{files[0][-14:-4]} → {files[-1][-14:-4]}"
@@ -152,6 +185,8 @@ def summary():
     }), include_groups=False)
     print(by_line.round(4).to_string())
 
+    if len(lines["day"].unique()) > 1:
+        versions(lines)
     movement(files)
 
     pick_files = sorted(glob.glob("graded/picks_*.csv"))

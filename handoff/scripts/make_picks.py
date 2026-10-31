@@ -18,6 +18,10 @@ import pandas as pd
 # Le modèle sous-estime les gros tireurs (README, point 7a; en live sur 15-18 oct.: 23,7% d'Over
 # prédit vs 30,3% réel sur 3,5), ce qui produit des Unders à EV gonflée sur ces lignes. Mesure
 # temporaire, à retirer quand une recalibration apprise sur les lignes notées sera en place.
+# Ajout du 2026-10-30 (picks à partir du 2026-10-31): 3e portefeuille "recalibre", modèle
+# recalibré (p_recal_over, voir compare_odds.py), sans la règle des Unders >= 3,5 puisque la
+# recalibration corrige la sous-estimation. "brut" et "ecart_retire" restent inchangés pour
+# pouvoir comparer les trois.
 
 BOOK = "pinnacle"
 MIN_EV = 0.05
@@ -52,13 +56,14 @@ def main():
     g["p_adj_over"] = (g["p_model_over"] - g["line"].map(gap_by_line)).clip(0.01, 0.99)
 
     picks = []
-    for portfolio, p_col in [("brut", "p_model_over"), ("ecart_retire", "p_adj_over")]:
+    for portfolio, p_col in [("brut", "p_model_over"), ("ecart_retire", "p_adj_over"), ("recalibre", "p_recal_over")]:
         sides = pd.concat([
             g.assign(side="Over", price=g["price_over"], p_model=g[p_col], p_market=g["p_market_over"]),
             g.assign(side="Under", price=g["price_under"], p_model=1 - g[p_col], p_market=1 - g["p_market_over"]),
         ])
         sides["ev"] = sides["p_model"] * sides["price"] - 1
-        sides = sides[~((sides["side"] == "Under") & (sides["line"] >= NO_UNDER_FROM_LINE))]
+        if portfolio != "recalibre":
+            sides = sides[~((sides["side"] == "Under") & (sides["line"] >= NO_UNDER_FROM_LINE))]
         best = (sides[sides["ev"] >= MIN_EV].sort_values("ev", ascending=False)
                 .drop_duplicates("playerId").head(MAX_PICKS))
         picks.append(best.assign(portfolio=portfolio))

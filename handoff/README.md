@@ -303,9 +303,10 @@ Trois mesures, de la plus rapide à la plus lente, calculées par
    `make_picks.py` : seulement les lignes cotées par **Pinnacle, au prix
    Pinnacle** (un livre où l'utilisateur parie, le plus sharp, et pas de
    lignes alternatives à un seul livre), EV ≥ 5 %, un pari par joueur, au
-   plus 10 par jour, mise fixe 1 u. Deux
-   portefeuilles : modèle brut et modèle avec l'écart moyen au marché
-   retiré. Fichier figé à 13 h, jamais réécrit. Le gain/perte est le moins
+   plus 10 par jour, mise fixe 1 u. Trois
+   portefeuilles : modèle brut, modèle avec l'écart moyen au marché
+   retiré, et modèle recalibré (`recalibre`, depuis le 31 oct. 2026, voir
+   ci-dessous). Fichier figé à 13 h, jamais réécrit. Le gain/perte est le moins
    précis des trois : à ~1,9 de cote, ± 12 points de ROI après un mois,
    ± 5 après une saison.
 
@@ -315,6 +316,19 @@ cotées par un seul livre (theScore Bet, Hard Rock) à des prix longs (2,45 à
 4,60), où le biais bas du modèle donnait des EV de +30 à +75 %. Règle
 changée pour "Pinnacle seulement" et picks du jour régénérés **avant le
 début des matchs** (aucun résultat connu).
+
+Recalibration live (30 oct. 2026) : sur 3 749 joueur-matchs du 15 au 29
+oct., les tirs réels dépassent le mu prédit de 4,4 %, à peu près autant à
+tous les niveaux de mu et toutes les positions (log mu' = a + b log mu
+donne b = 1,01), mais l'écart diminue (1,066 ± 0,019 du 15 au 22 oct.,
+1,017 ± 0,019 du 23 au 29). `compare_odds.py` multiplie donc mu par le
+ratio réel/prédit des 14 jours précédents (`p_recal_over`, aucune
+correction sous 500 joueur-matchs) ; le portefeuille `recalibre` l'utilise,
+sans la règle "pas d'Under ≥ 3,5". En validation jour par jour exclu, le
+recalibré améliore le Brier (0,2348 → 0,2342) sans rattraper le marché
+(0,2335) ; un mélange logistique modèle/marché (~45/55) le bat (0,2332)
+mais colle trop au marché pour dépasser la marge Pinnacle (16 paris à
+EV ≥ 5 % en 15 jours) : suivi dans le résumé de notation, pas parié.
 
 Décision après 4-6 semaines : sans précision au moins égale au marché (1)
 et CLV positive (2), le résultat du paper trading n'est que de la chance.
