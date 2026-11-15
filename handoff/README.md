@@ -330,6 +330,16 @@ recalibré améliore le Brier (0,2348 → 0,2342) sans rattraper le marché
 mais colle trop au marché pour dépasser la marge Pinnacle (16 paris à
 EV ≥ 5 % en 15 jours) : suivi dans le résumé de notation, pas parié.
 
+Changement du 15 nov. 2026 (picks à partir du 16 nov.) : le facteur est
+appris seulement sur les joueurs à ≥ 14 min de glace en moyenne sur leurs
+10 derniers matchs (`RECAL_MIN_TOI`, aucune cote utilisée). Le modèle
+surestime les petits temps de glace (réel/prédit 0,90 sous 10 min) et
+sous-estime les réguliers (1,03 à 1,07), et 91 % des joueurs cotés sont à
+≥ 14 min. Jour par jour exclu, 15 oct.-12 nov. : Brier 0,2361 → 0,2358
+(Pinnacle 0,2499 → 0,2495), P(Over) moyenne 0,455 → 0,469 (réel 0,477).
+Le résumé de notation recalcule le recalibré de tous les jours avec la
+nouvelle règle ; les picks `recalibre` déjà figés gardent l'ancien facteur.
+
 Décision après 4-6 semaines : sans précision au moins égale au marché (1)
 et CLV positive (2), le résultat du paper trading n'est que de la chance.
 

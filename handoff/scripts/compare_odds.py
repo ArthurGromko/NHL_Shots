@@ -15,9 +15,16 @@ from update_live_data import season_for
 # lignes cotées). En live, le modèle sous-estimait tout le monde d'environ 4% (6,6% sur
 # 15-22 oct., 1,7% sur 23-29 oct.), sans dépendance au niveau de mu (log mu' = a + b log mu
 # donne b = 1,01): un simple facteur suffit, et une fenêtre glissante suit sa décroissance.
+# Changement du 2026-11-15 (picks à partir du 2026-11-16): facteur appris seulement sur les
+# joueurs à >= RECAL_MIN_TOI min de glace en moyenne sur leurs 10 derniers matchs (sans cotes).
+# Les petits temps de glace sont surestimés (réel/prédit 0,90 sous 10 min, 0,96 de 10 à 12) et
+# tiraient le facteur vers le bas, alors que 91% des joueurs cotés sont à >= 14 min. Jour par
+# jour exclu, 15 oct.-12 nov.: Brier 0,2361 -> 0,2358 (Pinnacle 0,2499 -> 0,2495), P(Over)
+# moyenne 0,455 -> 0,469 pour 0,477 réel; même gain qu'un facteur appris sur les joueurs cotés.
 
 RECAL_DAYS = 14
 RECAL_MIN_ROWS = 500  # en dessous (début de saison), pas de correction
+RECAL_MIN_TOI = 14.0  # min de glace, moyenne des 10 derniers matchs (toi_avg_last10)
 
 
 def recal_factor(day, mp=None):
@@ -31,6 +38,7 @@ def recal_factor(day, mp=None):
                          usecols=["playerId", "gameId", "situation", "icetime", "I_F_shotsOnGoal"])
     mp = mp[(mp["situation"] == "all") & (mp["icetime"] > 0)]
     d = pd.concat(map(pd.read_csv, files)).merge(mp, on=["gameId", "playerId"])
+    d = d[d["toi_avg_last10"] >= RECAL_MIN_TOI]
     if len(d) < RECAL_MIN_ROWS:
         return 1.0, len(d)
     return d["I_F_shotsOnGoal"].sum() / d["mu"].sum(), len(d)
@@ -115,7 +123,7 @@ def main():
     wide.sort_values("edge_over", ascending=False).to_csv(path, index=False)
     print(f"{len(wide)} lignes (bookmaker x joueur x ligne), {wide['playerId'].nunique()} joueurs -> {path}")
     print(f"Vig médian: {wide['vig'].median():.1%}")
-    print(f"Recalibration: mu x {k:.3f} ({n_recal} joueur-matchs sur les {RECAL_DAYS} jours précédents)\n")
+    print(f"Recalibration: mu x {k:.3f} ({n_recal} joueur-matchs à >= {RECAL_MIN_TOI:g} min sur les {RECAL_DAYS} jours précédents)\n")
 
     # Meilleure espérance par joueur/ligne/côté, tous bookmakers confondus
     best = pd.concat([

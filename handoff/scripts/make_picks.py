@@ -22,6 +22,9 @@ import pandas as pd
 # recalibré (p_recal_over, voir compare_odds.py), sans la règle des Unders >= 3,5 puisque la
 # recalibration corrige la sous-estimation. "brut" et "ecart_retire" restent inchangés pour
 # pouvoir comparer les trois.
+# Changement du 2026-11-15 (picks à partir du 2026-11-16): le facteur de "recalibre" est appris
+# seulement sur les joueurs à >= 14 min de glace (voir compare_odds.py). Picks jusqu'au 15 nov. =
+# ancien facteur (tous les joueurs prédits).
 
 BOOK = "pinnacle"
 MIN_EV = 0.05
