@@ -204,6 +204,68 @@ def summary():
               f"{portfolio:13s} {len(settled):4d} paris | {settled['pnl'].sum():+.2f} u | pas de cotes de fermeture")
 
 
+def grade_bet365(force=False):
+    # Cotes bet365 relevées à la main (add_bet365.py), notées une fois les matchs dans MoneyPuck.
+    today = date.today().isoformat()
+    for f in sorted(glob.glob("bet365/bet365_*.csv")):
+        day = f[-14:-4]
+        out = f"graded/bet365_{day}.csv"
+        if day >= today or (os.path.exists(out) and not force):
+            continue
+        b = pd.read_csv(f)
+        shots = actual_shots(day)
+        if set(b["gameId"]) - set(shots["gameId"]):
+            continue  # pas encore dans MoneyPuck
+        b = b.merge(shots, on=["gameId", "playerId"], how="left")
+        b["void"] = b["shots"].isna()
+        b["over"] = (b["shots"] > b["line"]).astype(float).where(~b["void"])
+        b.to_csv(out, index=False)
+        print(f"{day}: {int((~b['void']).sum())} cotes bet365 notées")
+
+
+def bet365_summary():
+    # Over seulement: la proba implicite bet365 (1/cote) contient la marge, son Brier est donc
+    # pénalisé; la question utile est la colonne "vs Pinnacle" et le paper trading.
+    files = sorted(glob.glob("graded/bet365_*.csv"))
+    if not files:
+        return
+    b = pd.concat(map(pd.read_csv, files))
+    b = b[~b["void"].astype(bool)]
+    print(f"\n=== bet365, Over X+ relevés à la main ({len(files)} jour(s), {len(b)} cotes joueur x ligne) ===")
+    print(f"Brier modèle {brier(b['p_model_over'], b['over']):.4f} | bet365 implicite (marge incluse) "
+          f"{brier(b['p_implied'], b['over']):.4f} | Over réel {b['over'].mean():.3f}, modèle {b['p_model_over'].mean():.3f}")
+    both = b.dropna(subset=["p_pin_over"])
+    if len(both):
+        print(f"Lignes aussi cotées par Pinnacle ({len(both)}): Brier modèle {brier(both['p_model_over'], both['over']):.4f} "
+              f"| Pinnacle {brier(both['p_pin_over'], both['over']):.4f} | bet365 implicite - Pinnacle juste "
+              f"{100 * (both['p_implied'] - both['p_pin_over']).mean():+.1f} pt")
+
+    def paper(label, bets):
+        if not len(bets):
+            print(f"  {label}: aucun pari")
+            return
+        pnl = np.where(bets["over"] == 1, bets["price"] - 1, -1.0)
+        print(f"  {label}: {len(bets)} paris | {int(bets['over'].sum())} gagnés | {pnl.sum():+.2f} u | ROI {pnl.mean():+.1%}")
+    print("Paper trading au prix bet365 (1 u):")
+    best = b[b["ev_model"] >= 0.05].sort_values("ev_model", ascending=False).drop_duplicates(["date", "playerId"])
+    paper("modèle EV >= 5 %, meilleur par joueur", best)
+    paper("cote au-dessus du juste Pinnacle", b[b["ev_pin"] > 0])
+
+    # Picks Over des portefeuilles: prix Pinnacle figé vs meilleur des deux livres
+    pick_files = [f"graded/picks_{f[-14:-4]}.csv" for f in files if os.path.exists(f"graded/picks_{f[-14:-4]}.csv")]
+    if pick_files:
+        p = pd.concat(map(pd.read_csv, pick_files))
+        p = p[(p["side"] == "Over") & (p["result"] != "void")].merge(
+            b[["gameId", "playerId", "line", "price"]].rename(columns={"price": "b365_price"}),
+            on=["gameId", "playerId", "line"])
+        if len(p):
+            p["best_price"] = p[["price", "b365_price"]].max(axis=1)
+            p["pnl_best"] = np.where(p["result"] == "win", p["best_price"] - 1, -1.0)
+            for portfolio, g in p.groupby("portfolio"):
+                print(f"  picks Over {portfolio} avec cote bet365 ({len(g)}): Pinnacle {g['pnl'].sum():+.2f} u "
+                      f"| meilleur des deux {g['pnl_best'].sum():+.2f} u ({(g['b365_price'] > g['price']).mean():.0%} meilleurs chez bet365)")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="noter une date précise (sinon: toutes les dates capturées pas encore notées)")
@@ -222,7 +284,9 @@ def main():
         if os.path.exists(f"graded/lines_{day}.csv") and not args.force:
             continue
         grade_day(day)
+    grade_bet365(args.force)
     summary()
+    bet365_summary()
 
 
 if __name__ == "__main__":

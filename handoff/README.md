@@ -370,6 +370,15 @@ Notes :
   (il publie dans la journée). Capture de 13 h du 15 oct. : 8 bookmakers,
   ~3 000 cotes. La doc indique
   que les props sont "mainly limited to US sports and US bookmakers".
+- **Cotes bet365 à la main** (depuis le 18 nov. 2026) : bet365 n'offre que
+  des Over "X+ tirs" (pas d'Under). `add_bet365.py` prend un CSV
+  `name,1,2,3,4,5` (cotes 1+ à 5+, "3+" = Over 2,5) et écrit
+  `bet365/bet365_<date>.csv` avec le modèle recalibré et le juste Pinnacle
+  de 13 h. `grade_results.py` les note (`graded/bet365_<date>.csv`) et ajoute
+  au résumé : Brier modèle vs bet365 vs Pinnacle, paper trading au prix
+  bet365 (EV modèle ≥ 5 %, et cote au-dessus du juste Pinnacle), et picks
+  Over au meilleur prix des deux livres. Premier relevé (BOS @ DET, 15 h 36,
+  75 cotes) : bet365 implicite = juste Pinnacle + 5,5 pt en moyenne.
 - `certifi` ajouté au venv (le Python de python.org sur macOS n'a pas de
   certificats SSL par défaut).
 
