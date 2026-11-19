@@ -379,6 +379,15 @@ Notes :
   bet365 (EV modèle ≥ 5 %, et cote au-dessus du juste Pinnacle), et picks
   Over au meilleur prix des deux livres. Premier relevé (BOS @ DET, 15 h 36,
   75 cotes) : bet365 implicite = juste Pinnacle + 5,5 pt en moyenne.
+- **Paper trading bet365** (depuis le 18 nov. 2026) : à chaque saisie,
+  `add_bet365.py` fige dans `picks/bet365_picks_<date>.csv` les paris
+  EV ≥ 5 % (modèle recalibré, prix bet365, Over seulement), un par joueur,
+  au plus 10 par jour : portefeuille `bet365` (paliers 1+ à 5+) et
+  `bet365_max3` (1+ à 3+, en attendant de vérifier la queue du modèle : r
+  ajusté 22,7 vs 15,7 en prod, donc 4+/5+ probablement surestimés pour les
+  joueurs moyens). Cotes relevées après le début du match pas éligibles.
+  Relever tous les joueurs d'un match. Le résumé de notation montre aussi
+  le Brier par palier.
 - `certifi` ajouté au venv (le Python de python.org sur macOS n'a pas de
   certificats SSL par défaut).
 

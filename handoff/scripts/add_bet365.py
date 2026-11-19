@@ -1,5 +1,5 @@
-import argparse, glob, os, pickle, sys
-from datetime import date, datetime
+import argparse, glob, json, os, pickle, sys
+from datetime import date, datetime, timezone
 import numpy as np
 import pandas as pd
 from scipy.stats import nbinom
@@ -14,9 +14,66 @@ from compare_odds import match_players, recal_factor
 #    ligne remplace l'ancienne), avec la probabilité du modèle recalibré et celle de Pinnacle
 #    (vig retiré) au moment de la capture de 13 h, pour comparaison.
 # Ajout du 2026-11-18. Noté par grade_results.py (graded/bet365_<date>.csv + résumé).
+#
+# Paper trading bet365 (ajout du 2026-11-18, picks à partir du 2026-11-18), mêmes règles que
+# make_picks.py: probabilité "recalibre", EV >= 5 % au prix bet365, un pari par joueur, au plus
+# 10 par jour et par portefeuille, mise 1 u, Over seulement (bet365 n'a pas d'Under).
+# - "bet365": tous les paliers 1+ à 5+
+# - "bet365_max3": paliers 1+ à 3+ seulement. Le modèle suppose plus de dispersion que la
+#   réalité (r ajusté 22,7 vs 15,7 en prod), donc il surestime probablement les 4+/5+ des
+#   joueurs moyens, que les livres ne cotent pas en Over 3,5+ et qui n'ont jamais été notés.
+# Les picks sont figés à chaque saisie, parmi les cotes de cette saisie, jusqu'au plafond du jour,
+# et jamais réécrits (picks/bet365_picks_<date>.csv). Une cote relevée après le début du match
+# n'est pas éligible. Relever TOUS les joueurs d'un match, pas seulement ceux qui intéressent.
 
 WORKDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "pipeline_run")
 THRESHOLDS = [1, 2, 3, 4, 5]
+MIN_EV = 0.05
+MAX_PICKS = 10
+PORTFOLIOS = {"bet365": 4.5, "bet365_max3": 2.5}  # ligne maximale (Over)
+
+
+def game_starts(day):
+    """Heure de début (UTC) par gameId, depuis upcoming_games.json s'il est pour ce jour."""
+    try:
+        with open("upcoming_games.json") as f:
+            u = json.load(f)
+    except FileNotFoundError:
+        return {}
+    if u.get("date") != day:
+        return {}
+    return {g["gameId"]: pd.Timestamp(g["startTimeUTC"]) for g in u["games"]}
+
+
+def freeze_picks(day, new):
+    """Ajoute aux picks du jour les meilleurs paris des cotes `new`, sans toucher aux picks déjà figés."""
+    path = f"picks/bet365_picks_{day}.csv"
+    old = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame(columns=["portfolio", "playerId"])
+    starts = game_starts(day)
+    cap = pd.to_datetime(new["captured_at"]).dt.tz_localize(datetime.now().astimezone().tzinfo).dt.tz_convert("UTC")
+    start = new["gameId"].map(starts)
+    if start.isna().any():
+        print("Heure de début inconnue pour certains matchs: pas de vérification 'avant le match' pour eux")
+    eligible = new[~(cap >= start).fillna(False)]
+    if len(eligible) < len(new):
+        print(f"{len(new) - len(eligible)} cote(s) relevée(s) après le début du match: pas éligibles aux picks")
+    added = []
+    for portfolio, max_line in PORTFOLIOS.items():
+        mine = old[old["portfolio"] == portfolio]
+        room = MAX_PICKS - len(mine)
+        c = eligible[(eligible["line"] <= max_line) & (eligible["ev_model"] >= MIN_EV)
+                     & ~eligible["playerId"].isin(mine["playerId"])]
+        best = c.sort_values("ev_model", ascending=False).drop_duplicates("playerId").head(max(room, 0))
+        added.append(best.assign(portfolio=portfolio, side="Over", stake=1.0,
+                                 frozen_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")))
+        print(f"{portfolio}: {len(best)} pick(s) ajouté(s), {len(mine) + len(best)}/{MAX_PICKS} pour le {day}")
+    out = pd.concat([old] + added) if len(old) else pd.concat(added)
+    os.makedirs("picks", exist_ok=True)
+    out.to_csv(path, index=False)
+    new_picks = pd.concat(added)
+    if len(new_picks):
+        print(new_picks[["portfolio", "name", "line", "price", "p_model_over", "p_pin_over", "ev_model"]]
+              .round(3).to_string(index=False))
 
 
 def main():
@@ -69,11 +126,14 @@ def main():
 
     os.makedirs("bet365", exist_ok=True)
     path = f"bet365/bet365_{args.date}.csv"
+    batch = new
     if os.path.exists(path):
         new = pd.concat([pd.read_csv(path), new]).drop_duplicates(["playerId", "line"], keep="last")
     new.to_csv(path, index=False)
     print(f"{len(rows)} cote(s) ajoutée(s), {len(new)} au total -> {path}  (recalibration mu x {k:.3f})\n")
-    show = new[(new["ev_model"] >= 0.05) | (new["ev_pin"] > 0)].sort_values("ev_model", ascending=False)
+    freeze_picks(args.date, batch)
+    print()
+    show = batch[(batch["ev_model"] >= 0.05) | (batch["ev_pin"] > 0)].sort_values("ev_model", ascending=False)
     if len(show):
         print("EV >= 5 % selon le modèle, ou cote au-dessus du juste Pinnacle:")
         print(show[["name", "line", "price", "p_model_over", "p_pin_over", "pin_price_over", "ev_model", "ev_pin"]]

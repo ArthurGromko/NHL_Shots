@@ -221,12 +221,19 @@ def grade_bet365(force=False):
         b["over"] = (b["shots"] > b["line"]).astype(float).where(~b["void"])
         b.to_csv(out, index=False)
         print(f"{day}: {int((~b['void']).sum())} cotes bet365 notées")
+        pick_path = f"picks/bet365_picks_{day}.csv"
+        if os.path.exists(pick_path):
+            p = pd.read_csv(pick_path).merge(shots, on=["gameId", "playerId"], how="left")
+            p["result"] = np.where(p["shots"].isna(), "void", np.where(p["shots"] > p["line"], "win", "loss"))
+            p["pnl"] = np.select([p["result"] == "win", p["result"] == "loss"],
+                                 [p["stake"] * (p["price"] - 1), -p["stake"]], 0.0)
+            p.to_csv(f"graded/bet365_picks_{day}.csv", index=False)
 
 
 def bet365_summary():
     # Over seulement: la proba implicite bet365 (1/cote) contient la marge, son Brier est donc
     # pénalisé; la question utile est la colonne "vs Pinnacle" et le paper trading.
-    files = sorted(glob.glob("graded/bet365_*.csv"))
+    files = sorted(glob.glob("graded/bet365_2*.csv"))
     if not files:
         return
     b = pd.concat(map(pd.read_csv, files))
@@ -246,10 +253,26 @@ def bet365_summary():
             return
         pnl = np.where(bets["over"] == 1, bets["price"] - 1, -1.0)
         print(f"  {label}: {len(bets)} paris | {int(bets['over'].sum())} gagnés | {pnl.sum():+.2f} u | ROI {pnl.mean():+.1%}")
+    # par palier: chaque joueur relevé a toute l'échelle 1+ à 5+, y compris des paliers que les
+    # livres ne cotent pas en Over/Under (ex. 4+ d'un joueur à mu 2): teste la queue du modèle
+    print("Par palier (X+ = Over X-0,5):")
+    by = b.groupby("line").apply(lambda d: pd.Series({
+        "n": len(d), "reel": d["over"].mean(), "modele": d["p_model_over"].mean(),
+        "bet365": d["p_implied"].mean(), "brier_modele": brier(d["p_model_over"], d["over"]),
+        "brier_bet365": brier(d["p_implied"], d["over"]),
+    }), include_groups=False)
+    by.index = [f"{int(l + 0.5)}+" for l in by.index]
+    print(by.round(4).to_string())
+
     print("Paper trading au prix bet365 (1 u):")
-    best = b[b["ev_model"] >= 0.05].sort_values("ev_model", ascending=False).drop_duplicates(["date", "playerId"])
-    paper("modèle EV >= 5 %, meilleur par joueur", best)
-    paper("cote au-dessus du juste Pinnacle", b[b["ev_pin"] > 0])
+    pf = sorted(glob.glob("graded/bet365_picks_*.csv"))
+    if pf:
+        bp = pd.concat(map(pd.read_csv, pf))
+        for portfolio, g in bp.groupby("portfolio"):
+            g = g[g["result"] != "void"]
+            print(f"  {portfolio:13s} {len(g):4d} paris | {int((g['result'] == 'win').sum())} gagnés | "
+                  f"{g['pnl'].sum():+.2f} u | ROI {g['pnl'].sum() / max(len(g), 1):+.1%}")
+    paper("toute cote au-dessus du juste Pinnacle (non figé)", b[b["ev_pin"] > 0])
 
     # Picks Over des portefeuilles: prix Pinnacle figé vs meilleur des deux livres
     pick_files = [f"graded/picks_{f[-14:-4]}.csv" for f in files if os.path.exists(f"graded/picks_{f[-14:-4]}.csv")]
