@@ -80,7 +80,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", nargs="?", help="CSV name,1,2,3,4,5 (défaut: stdin)")
     parser.add_argument("--date", default=date.today().isoformat())
-    parser.add_argument("--at", help="heure du relevé HH:MM (défaut: maintenant)")
+    parser.add_argument("--at", help="heure du relevé, HH:MM (le jour de --date) ou YYYY-MM-DDTHH:MM (défaut: maintenant)")
     args = parser.parse_args()
     raw = pd.read_csv(args.input or sys.stdin, dtype={"name": str})
     os.chdir(WORKDIR)
@@ -97,7 +97,8 @@ def main():
     edges = pd.read_csv(edges_path) if os.path.exists(edges_path) else None
     k = edges["recal_factor"].iloc[0] if edges is not None else recal_factor(args.date)[0]
 
-    at = args.at or datetime.now().strftime("%H:%M")
+    at = args.at or datetime.now().strftime("%Y-%m-%dT%H:%M")
+    captured_at = at if "T" in at else f"{args.date}T{at}"
     rows = []
     for _, x in raw[raw["name"].isin(mapping)].iterrows():
         pid = mapping[x["name"]]
@@ -106,7 +107,7 @@ def main():
             price = pd.to_numeric(x.get(str(t)), errors="coerce")
             if pd.isna(price):
                 continue
-            rows.append({"date": args.date, "captured_at": f"{args.date}T{at}", "gameId": pr["gameId"],
+            rows.append({"date": args.date, "captured_at": captured_at, "gameId": pr["gameId"],
                          "playerId": pid, "name": pr["name"], "playerTeam": pr["playerTeam"],
                          "line": t - 0.5, "price": float(price), "mu": pr["mu"], "recal_factor": k})
     new = pd.DataFrame(rows)
